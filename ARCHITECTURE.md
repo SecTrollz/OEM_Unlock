@@ -70,11 +70,25 @@ same copy-paste-into-your-proxy-tool workflow as before, now produced by
 — run via `npm test` (Node's built-in `node:test`, no dependency to add).
 Possible now because `src/core` doesn't touch any proxy-runtime globals.
 
+### `scripts/` — the two entry points
+
+| File | Role |
+|---|---|
+| `setup.js` (`npm run setup`) | Runs the build, generates a local self-signed cert via `openssl` if one doesn't already exist, and prints the one-time device-prep checklist (proxy settings, CA install) that can't be automated from here because it happens on the phone. |
+| `start.js` (`npm start` / `npm run start-offline`) | Launches `mitmproxy -s oem_unlock.js` directly if `mitmproxy` is installed — that's the actual "run" step for the desktop-proxy workflow. If it isn't installed (e.g. you're on the Proxy Pin Android app, which has no desktop CLI to launch), it prints the Proxy Pin manual-load steps instead of pretending to automate something it can't reach, and falls back to starting the offline mock server. `--offline` skips straight to the mock server. |
+
+Both exist so the whole desktop-side prep collapses to two commands
+(`npm run setup && npm start`) before you go to the device and trigger the
+actual unlock flow (dial the carrier's SIM-unlock USSD code, which is what
+causes Android to fire the AFW provisioning request this proxy is watching
+for — the USSD dial itself is never visible to the proxy, only the HTTPS
+request it triggers is).
+
 ### Offline/local tooling
 
 | File | Role |
 |---|---|
-| `mock-server.js` | Node `http` server on port 3000 serving canned JSON for `/v1/device/provisioning` and `/v1/device/unlock`, for testing without hitting real Google endpoints. Run via `npm run start-offline`. |
+| `mock-server.js` | Node `http` server on port 3000 serving canned JSON for `/v1/device/provisioning` and `/v1/device/unlock`, for testing without hitting real Google endpoints. Run via `npm run start-offline` (or `npm start` when `mitmproxy` isn't found). |
 
 ### Documentation
 
