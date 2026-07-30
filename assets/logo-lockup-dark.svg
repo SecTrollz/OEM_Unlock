@@ -1,0 +1,26 @@
+<svg width="560" height="120" viewBox="0 0 560 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OEM_UNLOCK - Provisioning Bypass Toolkit">
+  <title>OEM_UNLOCK — Provisioning Bypass Toolkit</title>
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#35D48A"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(6,4) scale(1.6)">
+    <path d="M32 4 L54 12 L54 30 C54 46 44 56 32 60 C20 56 10 46 10 30 L10 12 Z"
+          fill="#0B0F14" stroke="url(#accent)" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M10 44 L5 50 L5 57" fill="none" stroke="#38BDF8" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="5" cy="57" r="1.6" fill="#38BDF8"/>
+    <circle cx="10" cy="44" r="1.4" fill="#38BDF8"/>
+    <rect x="21" y="34" width="22" height="16" rx="3" fill="#E6EDF3"/>
+    <path d="M25.5 34 V27 A6.5 6.5 0 0 1 38.5 27 V31" fill="none" stroke="#35D48A" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="32" cy="40.5" r="2.1" fill="#0B0F14"/>
+    <rect x="31" y="41.5" width="2" height="4.5" fill="#0B0F14"/>
+  </g>
+
+  <text x="132" y="60" font-family="'JetBrains Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+        font-size="34" font-weight="700" letter-spacing="0.5" fill="#E6EDF3">OEM_UNLOCK</text>
+  <text x="134" y="84" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+        font-size="14" letter-spacing="3" fill="#9AA9B8">PROVISIONING BYPASS TOOLKIT</text>
+</svg>

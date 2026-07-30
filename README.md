@@ -1,6 +1,11 @@
-OEM Unlock Proxy Script
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-lockup-dark.svg">
+  <img alt="OEM_UNLOCK — Provisioning Bypass Toolkit" src="assets/logo-lockup.svg" width="420">
+</picture>
 
 A powerful proxy script designed to bypass carrier restrictions and enable OEM unlocking on Android devices by intercepting and modifying Google's provisioning API responses.
+
+See [`BRANDING.md`](BRANDING.md) for the logo and brand design blueprint.
 
 ⚠️ Important Disclaimer
 
