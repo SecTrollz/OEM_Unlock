@@ -4,9 +4,11 @@
   "private": true,
   "description": "Proxy scripts that bypass carrier OEM-unlock restrictions on Google provisioning APIs.",
   "scripts": {
+    "setup": "node scripts/setup.js",
+    "start": "node scripts/start.js",
+    "start-offline": "node scripts/start.js --offline",
     "build": "node build.js",
-    "test": "node --test",
-    "start-offline": "node mock-server.js"
+    "test": "node --test"
   },
   "license": "UNLICENSED"
 }

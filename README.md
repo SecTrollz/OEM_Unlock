@@ -41,7 +41,7 @@ It strategically modifies response payloads to indicate that OEM unlocking is pe
 
 Required Tools
 
-· Proxy Tool: Burp Suite, MITMproxy, Charles Proxy, or similar
+· Proxy Tool: Burp Suite, MITMproxy, Charles Proxy, or the Proxy Pin Android app
 · Network Access: Ability to route device traffic through proxy
 · Root/ADB Access: Depending on device configuration
 · Technical Knowledge: Understanding of proxy setup and SSL interception
@@ -64,60 +64,49 @@ file does and why it's structured this way.
 
 🚀 Installation & Setup
 
-0. Build the scripts (no dependencies to install)
+Two commands, run once each per machine:
 
 ```bash
 git clone <your-repo>
 cd OEM_Unlock
-npm run build   # regenerates oem_unlock.js and friends from src/
-npm test        # optional: runs the unit tests for the core unlock logic
+npm run setup   # builds the scripts, generates a local cert, prints device-prep steps
+npm start        # launches the interceptor (mitmproxy if installed) and tells you what's next
 ```
 
-1. Proxy Configuration
+`npm run setup` builds all six interceptor scripts from `src/`, generates a
+local HTTPS certificate if `openssl` is available, and prints the one-time
+device-side steps (proxy settings + CA cert install) that genuinely can't
+be automated from a repo script — they happen on your phone, not here.
 
-```bash
-# Using MITMproxy (Python)
-pip install mitmproxy
-mitmproxy -s oem_unlock.js
+`npm start` launches `mitmproxy -s oem_unlock.js` directly if `mitmproxy`
+is installed (`pip install mitmproxy` first). If you're using the Proxy
+Pin Android app instead, there's no desktop process for this command to
+start — Proxy Pin runs entirely on the phone — so it prints the exact
+manual steps for that path instead and starts the offline mock server as
+a fallback. See `HOW-TO-WITH-PROXYPIN-OFFLINE.md`, `proxypinondevice.md`,
+or `Nuke-unlock-doc.md` for which script fits your setup.
 
-# Using Burp Suite
-# Import the script via Extender > BApp Store > Custom Script
-```
-
-2. Device Proxy Setup
-
-```bash
-# Set up proxy on your device
-adb shell settings put global http_proxy [proxy_ip]:[proxy_port]
-
-# Or configure WiFi proxy manually in network settings
-```
-
-3. SSL Certificate Installation
-
-```bash
-# Download and install proxy CA certificate
-wget http://mitm.it/cert/pem -O mitmproxy-ca-cert.pem
-adb push mitmproxy-ca-cert.pem /sdcard/
-# Install certificate via Security settings
-```
-
-4. Script Deployment
-
-Copy the provided JavaScript code into your proxy's script directory or paste into the script editor of your proxy tool.
+Everything from here on is manual by nature: installing a cert on a phone
+and dialing a USSD code aren't things a setup script can do for you.
 
 🛠️ Usage Instructions
 
 Basic Flow
 
-1. Start Proxy: Launch your proxy tool with the script loaded
-2. Configure Device: Set device to use proxy for all traffic
-3. Trigger Provisioning:
-   · Go to Settings > Developer Options
-   · Attempt to toggle OEM unlocking
-   · Or perform factory reset to trigger provisioning
-4. Monitor Logs: Watch proxy console for modification messages
-5. Verify Unlock: Check if OEM unlock toggle is now enabled
+1. `npm run setup && npm start` (see above)
+2. Confirm your device's proxy points at this machine, and the proxy
+   tool's CA cert is installed on the device (both covered by `npm run setup`'s printed checklist)
+3. **Go to your phone's dialer and enter your carrier's SIM-unlock USSD
+   trigger code.** That's what makes Android fire its provisioning check
+   against Google's AFW APIs — this proxy is what intercepts that request
+   and rewrites the response to say the unlock is allowed. The USSD dial
+   itself never goes over the network the proxy can see; it's purely the
+   trigger that causes the *next* step, the actual HTTPS provisioning
+   call, to fire.
+4. Watch the proxy console (or Proxy Pin's in-app log) for `[OEM Unlock]`
+   lines confirming a response was modified
+5. Verify Unlock: check Settings > Developer Options — the OEM unlocking
+   toggle should now be enabled
 
 Advanced Usage
 
