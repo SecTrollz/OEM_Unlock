@@ -1,4 +1,4 @@
-The problem is likely one of these common fucking issues with Proxy Pin and OEM unlocking:
+Common issues with Proxy Pin and OEM unlocking, and how to work through them.
 
 🔥 MAIN PROBLEMS & SOLUTIONS
 
@@ -19,40 +19,23 @@ proxy.onResponse(function(request, response) {
 
 Check:
 
-· Is Proxy Pin VPN actually running? (red VPN icon in status bar)
-· Did you grant VPN permissions?
-· Is there other VPN/app conflicting?
+- Is Proxy Pin VPN actually running? (red VPN icon in status bar)
+- Did you grant VPN permissions?
+- Is there another VPN/app conflicting?
 
 2. GOOGLE API ENDPOINTS CHANGED
 
-The fucking carriers keep changing endpoints. Try this expanded target list:
+Carriers and Google both change endpoints over time. The canonical target
+host list lives in one place now — [`src/core/config.js`](src/core/config.js)
+(`TARGET_HOSTS`) — instead of being copied and re-copied across every
+script and doc. If you find traffic to a provisioning-related host that
+isn't in that list:
 
-```javascript
-const TARGET_HOSTS = [
-    "afwprovisioning-pa.googleapis.com",
-    "android.clients.google.com", 
-    "android.googleapis.com",
-    "www.googleapis.com",
-    "device-policy.googleapis.com",
-    "mobile-services.googleapis.com",
-    "carrier-services.googleapis.com",
-    "devicesettings-pa.googleapis.com",
-    "devicemanagement.googleapis.com",
-    "androidmanagement.googleapis.com",
-    "firebaseapp.com",
-    "googleapis.com" // BROAD CATCH-ALL
-];
-
-// Wildcard matching
-const isTarget = TARGET_HOSTS.some(host => 
-    request.hostname.includes(host) || 
-    request.hostname.endsWith('.googleapis.com')
-);
-```
+1. Add it to `TARGET_HOSTS` in `src/core/config.js`
+2. Run `npm run build` to regenerate all six scripts with the new host included
+3. Reload the updated script into your proxy tool
 
 3. HTTPS/CERTIFICATE ISSUES
-
-Fix the fucking certificate problem:
 
 ```bash
 # Check if certificate is installed
@@ -65,61 +48,45 @@ adb shell am start -n com.android.certinstaller/.CertInstallerMain
 
 4. SCRIPT NOT LOADING PROPERLY
 
-Simplify the fucking script - test with this minimal version:
+Test with this minimal script first to confirm interception is working at
+all, independent of the unlock logic:
 
 ```javascript
 // MINIMAL TEST SCRIPT - PROVE INTERCEPTION WORKS
 proxy.onResponse(function(request, response) {
     console.log("🎯 INTERCEPTING:", request.hostname);
-    
-    // Just modify ANY JSON response to prove it works
+
     if (request.hostname.includes("google")) {
         console.log("✅ Google API intercepted!");
-        
+
         try {
-            let body = typeof response.body === 'string' ? 
+            let body = typeof response.body === 'string' ?
                       JSON.parse(response.body) : response.body;
-            
-            // Add a fucking marker to prove modification
+
             body.proxy_pin_test = "SCRIPT_IS_WORKING_" + Date.now();
-            
+
             response.body = JSON.stringify(body);
             console.log("✅ Response modified!");
         } catch(e) {
             console.log("❌ JSON parse error:", e.message);
         }
     }
-    
+
     return response;
 });
 ```
 
-5. CARRIER SPECIFIC SHIT
+5. CARRIER-SPECIFIC APIS
 
-Different carriers use different APIs. Add carrier-specific hooks:
-
-```javascript
-// Carrier-specific modifications
-const CARRIER_APIS = {
-    "verizon": ["lvs.prod.iz", "vzwowapi"],
-    "att": ["att.com", "mobile.att.net"],
-    "tmobile": ["t-mobile.com", "tmobile.com"],
-    "sprint": ["sprint.com", "pins.sprint.com"]
-};
-
-// Check current carrier
-function getCarrier() {
-    // You might need to detect carrier from other API calls
-    return "unknown";
-}
-```
+Different carriers use different APIs beyond Google's own endpoints. If
+you identify one, add it to `TARGET_HOSTS` in `src/core/config.js` the same
+way as step 2 above, rather than hardcoding a separate list here.
 
 🚨 IMMEDIATE DEBUGGING STEPS
 
 Step 1: Verify Proxy Pin is Working
 
 ```javascript
-// Add this to your script - test if basic interception works
 console.log("🔊 PROXY PIN SCRIPT LOADED!");
 
 proxy.onRequest(function(request) {
@@ -135,19 +102,17 @@ Step 2: Check What's Being Intercepted
 In Proxy Pin app:
 
 1. Go to Logs tab
-2. Look for ANY Google API traffic
+2. Look for any Google API traffic
 3. If nothing appears → VPN not working
-4. If traffic appears but not modified → Script issue
+4. If traffic appears but not modified → script issue, or the hostname isn't in `TARGET_HOSTS` yet
 
 Step 3: Test with Simple Modification
 
 ```javascript
-// TEST: Modify a simple, common API first
 proxy.onResponse(function(request, response) {
     if (request.hostname.includes("googleapis.com")) {
         console.log("🎯 FOUND GOOGLE API - MODIFYING");
-        
-        // Just add a test field to ANY response
+
         try {
             let body = JSON.parse(response.body);
             body._proxy_test = Date.now();
@@ -173,53 +138,48 @@ adb shell pm clear com.google.android.gms
 adb shell pm clear com.google.android.ims
 ```
 
-💀 COMMON FUCK-UPS & FIXES
+💀 COMMON FAILURE MODES
 
 Problem: "Script loaded but no logs"
 
-Solution: Proxy Pin VPN not active or conflicting with other VPN
+Solution: Proxy Pin VPN not active or conflicting with another VPN
 
 Problem: "Traffic captured but not modified"
 
-Solution: JSON parsing error or wrong content-type
+Solution: JSON parsing error, wrong content-type, or the hostname isn't in
+`TARGET_HOSTS` — check `src/core/config.js`
 
 Problem: "OEM toggle still greyed out"
 
-Solution: Wrong API endpoint or carrier-specific lock
+Solution: Wrong API endpoint or carrier-specific lock — see `nuclear_unlock.js`
+(`Nuke-unlock-doc.md`) for the broader-net fallback
 
 Problem: "HTTPS interception failing"
 
 Solution: Certificate not properly installed
 
-🛠️ NUCLEAR OPTION - BROAD INTERCEPTION
+🛠️ WIDER-NET DEBUGGING
+
+If you need to see everything hitting Google-related domains to find the
+right endpoint before adding it to `TARGET_HOSTS`, log broadly first
+(temporarily — don't ship this as your actual interceptor):
 
 ```javascript
-// INTERCEPT EVERYTHING until we find the right API
+// LOG EVERYTHING to find the right endpoint, then add it to
+// src/core/config.js and go back to the real scripts
 proxy.onResponse(function(request, response) {
-    // Log EVERY HTTPS request to find the right endpoint
     if (request.url.startsWith("https")) {
         console.log("🌐 HTTPS TRAFFIC:", request.hostname + request.path);
     }
-    
-    // If it looks like any device management API
-    if (request.hostname.includes('google') || 
+
+    if (request.hostname.includes('google') ||
         request.path.includes('device') ||
         request.path.includes('unlock') ||
         request.path.includes('provision') ||
         request.path.includes('policy')) {
-        
         console.log("🎯 POTENTIAL TARGET:", request.url);
-        
-        try {
-            let body = JSON.parse(response.body);
-            body._intercepted = true;
-            body._timestamp = Date.now();
-            response.body = JSON.stringify(body);
-        } catch(e) {
-            // Not JSON, ignore
-        }
     }
-    
+
     return response;
 });
 ```
@@ -228,17 +188,18 @@ proxy.onResponse(function(request, response) {
 
 In the Proxy Pin app, make sure:
 
-1. ✅ VPN permission granted
-2. ✅ Script enabled (toggle on)
-3. ✅ Certificate installed (green checkmark)
-4. ✅ No other VPN running
-5. ✅ WiFi/Mobile data working normally
+1. VPN permission granted
+2. Script enabled (toggle on)
+3. Certificate installed (green checkmark)
+4. No other VPN running
+5. WiFi/Mobile data working normally
 
 Test with:
 
 1. Open Chrome and visit http://google.com
 2. Check Proxy Pin logs for traffic
 3. If no traffic → VPN issue
-4. If traffic but no modification → Script issue
+4. If traffic but no modification → script issue
 
-What specific error are you seeing? The fucking logs will tell you exactly what's wrong.
+The Proxy Pin logs will usually tell you exactly what's wrong — check them
+first before changing anything.

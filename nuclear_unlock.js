@@ -1,405 +1,505 @@
- // == BROAD-SPECTRUM OEM UNLOCK PROXY ==
-// This shit intercepts EVERYTHING and forces unlock on ANY relevant API
+// AUTO-GENERATED from src/core + src/adapters — do not hand-edit.
+// Edit the source and run 'npm run build' to regenerate this file.
 
-(function() {
-    'use strict';
+'use strict';
 
-    // 🌋 NUCLEAR INTERCEPTION CONFIG - TARGET EVERYTHING
-    const CONFIG = {
-        enabled: true,
-        debug: true,
-        nuclearMode: true,
-        
-        // INTERCEPT EVERY FUCKING DOMAIN
-        targetDomains: [
-            "google", "android", "samsung", "lge", "motorola", "oneplus",
-            "xiaomi", "huawei", "carrier", "verizon", "att", "tmobile",
-            "sprint", "vzw", "mobile", "api", "rest", "service",
-            "device", "provision", "unlock", "lock", "policy", "management",
-            "ota", "update", "cloud", "sync", "account", "auth"
-        ],
-        
-        // EVERY POSSIBLE OEM LOCK FIELD
-        lockFields: [
-            "lock", "unlock", "oem", "bootloader", "carrier", "sim",
-            "network", "provision", "management", "policy", "restriction",
-            "enforce", "disable", "allow", "permit", "status", "state",
-            "toggle", "switch", "setting", "config", "configuration"
-        ],
-        
-        // FORCE THESE VALUES
-        unlockValues: {
-            locked: false,
-            unlockAllowed: true,
-            enabled: true,
-            allowed: true,
-            permitted: true,
-            status: "UNLOCKED",
-            state: "UNLOCKED",
-            value: true,
-            result: "SUCCESS",
-            success: true,
-            code: 0
-        }
+function hasOemLockStatus(obj) {
+  return !!(obj && (
+    obj.oem_lock_status !== undefined ||
+    obj.oemUnlockStatus !== undefined ||
+    obj.unlockStatus !== undefined ||
+    (obj.status && typeof obj.status === 'object' && obj.status.oem_unlock !== undefined)
+  ));
+}
+
+function hasProvisioningStatus(obj) {
+  return !!(obj && (
+    obj.provisioningStatus !== undefined ||
+    obj.afwProvisioning !== undefined ||
+    obj.managementStatus !== undefined
+  ));
+}
+
+function hasCarrierLockStatus(obj) {
+  return !!(obj && (
+    obj.carrier_lock !== undefined ||
+    obj.simlock !== undefined ||
+    obj.network_lock !== undefined ||
+    obj.carrier_restrictions !== undefined
+  ));
+}
+
+function hasBootloaderStatus(obj) {
+  return !!(obj && (
+    obj.bootloader !== undefined ||
+    obj.bootloaderStatus !== undefined
+  ));
+}
+
+function hasPolicyRestrictions(obj) {
+  return !!(obj && (
+    obj.policy !== undefined ||
+    obj.restrictions !== undefined ||
+    obj.enterpriseConfig !== undefined
+  ));
+}
+
+function isUnlockRelatedRequest(path, obj) {
+  const unlockKeywords = [
+    'unlock', 'oem', 'bootloader', 'carrier', 'simlock',
+    'provisioning', 'afw', 'enterprise',
+  ];
+  const haystack = ((path || '') + JSON.stringify(obj || {})).toLowerCase();
+  return unlockKeywords.some((keyword) => haystack.includes(keyword));
+}
+
+function getNested(obj, path) {
+  return path.split('.').reduce((o, p) => (o ? o[p] : undefined), obj);
+}
+
+function setNested(obj, path, value) {
+  const keys = path.split('.');
+  const lastKey = keys.pop();
+  const target = keys.reduce((o, p) => (o[p] = o[p] || {}), obj);
+  target[lastKey] = value;
+}
+
+// oem_unlock.js used Buffer.byteLength, the Proxy Pin variants used
+// TextEncoder — pick whichever the runtime actually has instead of
+// assuming one.
+function byteLength(str) {
+  if (typeof Buffer !== 'undefined') return Buffer.byteLength(str);
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str).length;
+  return str.length;
+}
+
+// oem_unlock.js's ungzip() silently returned the still-compressed body if
+// no global Zlib was present, so a modification pass would then run against
+// binary garbage with no indication anything was wrong. This fails loudly
+// instead.
+function decompressGzip(body, headers) {
+  const encoding = ((headers && headers['content-encoding']) || '').toLowerCase();
+  if (encoding !== 'gzip') return { body, decompressed: false };
+
+  if (typeof Zlib !== 'undefined' && Zlib.gunzipSync) {
+    return { body: Zlib.gunzipSync(body).toString(), decompressed: true };
+  }
+
+  console.warn(
+    '[oem-unlock] gzip response received but no Zlib available in this ' +
+    'runtime — leaving body compressed, detectors will find nothing.'
+  );
+  return { body, decompressed: false };
+}
+
+function generateUnlockToken() {
+  return 'perm_unlock_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
+}
+
+// oem_unlock.js tried a plain JSON.parse then a wrapper-extraction regex;
+// the other three adapters didn't try the fallback at all and would just
+// give up on any non-strict-JSON body. One shared, best-effort parser.
+function safeParseJson(raw) {
+  if (raw && typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch (e2) {
+      return null;
+    }
+  }
+}
+
+// Consolidates modifyOemLockStatus/modifyProvisioningStatus/etc, which
+// previously existed as four separate hand-written copies (oem_unlock.js,
+// oem_unlock_proxy_pin.js, proxypin-oem-unlock.js, nuclear_unlock.js).
+// `permanent` toggles the extra anti-relock fields proxypin-oem-unlock.js
+// used to hardcode into its own private copy of these functions.
+
+function modifyOemLockStatus(obj, { permanent = false } = {}) {
+  const base = {
+    locked: false,
+    user_toggle_enabled: true,
+    enforced_by_carrier: false,
+    reason: 'OEM unlocking allowed',
+    supported: true,
+    modified_by_proxy: true,
+  };
+
+  const permanentFields = permanent ? {
+    carrier_enforceable: false,
+    permanent_unlock: true,
+    unlock_date: Date.now(),
+    unlock_reason: 'Permanent carrier unlock',
+    future_lock_prevention: {
+      allowed: false,
+      require_user_consent: true,
+      max_lock_duration: 0,
+      carrier_override_disabled: true,
+    },
+  } : {};
+
+  const merged = { ...base, ...permanentFields };
+
+  ['oem_lock_status', 'status.oem_unlock'].forEach((path) => {
+    setNested(obj, path, merged);
+  });
+  if (obj.oemUnlockStatus !== undefined) {
+    obj.oemUnlockStatus = { locked: false, unlockAllowed: true, userToggleable: true, ...permanentFields };
+  }
+
+  if (obj.oem_unlock_allowed !== undefined) obj.oem_unlock_allowed = true;
+  if (obj.isOemUnlockAllowed !== undefined) obj.isOemUnlockAllowed = true;
+  if (obj.unlockAllowed !== undefined) obj.unlockAllowed = true;
+  if (permanent) obj.permanent_unlock_granted = true;
+
+  return obj;
+}
+
+function modifyProvisioningStatus(obj, { permanent = false } = {}) {
+  if (obj.provisioningStatus !== undefined) {
+    obj.provisioningStatus = permanent ? 'COMPLETE_PERMANENT' : 'COMPLETE';
+    obj.isProvisioned = true;
+    obj.requiresOemUnlock = false;
+  }
+
+  if (obj.afwProvisioning !== undefined) {
+    obj.afwProvisioning = {
+      completed: true,
+      remainingSteps: 0,
+      canOemUnlock: true,
+      status: permanent ? 'SUCCESS_PERMANENT' : 'SUCCESS',
+      ...(permanent ? { permanent_unlock: true } : {}),
     };
+  }
 
-    // 🚀 MAIN INTERCEPTOR - CATCH EVERYTHING
-    proxy.onResponse(function(request, response) {
-        if (!CONFIG.enabled) return response;
-        
-        try {
-            const url = request.url.toLowerCase();
-            const hostname = request.hostname.toLowerCase();
-            
-            // 🌐 INTERCEPT IF DOMAIN MATCHES ANY TARGET
-            const shouldIntercept = CONFIG.targetDomains.some(domain => 
-                hostname.includes(domain) || 
-                url.includes(domain)
-            );
-            
-            // 🎯 NUCLEAR MODE: INTERCEPT EVERY HTTPS REQUEST
-            if (CONFIG.nuclearMode && request.url.startsWith("https")) {
-                if (CONFIG.debug) console.log("🌐 NUCLEAR: Intercepting HTTPS:", hostname);
-                return processResponseNuclear(request, response);
-            }
-            
-            if (!shouldIntercept) return response;
+  if (permanent && obj.managementStatus !== undefined) {
+    obj.managementStatus = 'FULLY_MANAGED_UNLOCKED';
+  }
 
-            if (CONFIG.debug) {
-                console.log("🎯 INTERCEPTING:", hostname + request.path);
-            }
+  return obj;
+}
 
-            return processResponse(request, response);
-            
-        } catch (error) {
-            if (CONFIG.debug) {
-                console.error("💥 ERROR:", error);
-            }
-            return response;
-        }
-    });
+function modifyCarrierLockStatus(obj, { permanent = false } = {}) {
+  if (obj.carrier_lock !== undefined) {
+    obj.carrier_lock = {
+      locked: false,
+      enforced: false,
+      can_unlock: true,
+      ...(permanent ? {
+        permanent_unlock: true,
+        enforceable: false,
+        unlock_token: generateUnlockToken(),
+        unlock_timestamp: Date.now(),
+      } : {}),
+    };
+  }
 
-    // 💣 NUCLEAR PROCESSING - MODIFY EVERY FUCKING RESPONSE
-    function processResponseNuclear(request, response) {
-        let modified = false;
-        let newResponse = JSON.parse(JSON.stringify(response));
-        
-        // TRY EVERY POSSIBLE CONTENT TYPE
-        const contentType = (newResponse.headers['content-type'] || '').toLowerCase();
-        const isText = contentType.includes('text') || 
-                       contentType.includes('json') || 
-                       contentType.includes('xml') ||
-                       contentType.includes('javascript') ||
-                       !contentType; // Assume text if no content-type
-        
-        if (!isText) {
-            // Even binary data might contain strings we can modify
-            if (CONFIG.debug) console.log("🔧 Attempting binary data modification");
-        }
+  if (obj.simlock !== undefined) {
+    obj.simlock = permanent
+      ? { locked: false, state: 'UNLOCKED_PERMANENT', network_subset: false, service_provider: false, corporate: false, sim: false }
+      : { locked: false, state: 'UNLOCKED' };
+  }
 
-        // TRY EVERY POSSIBLE DATA TYPE
-        let bodyStr = '';
-        try {
-            bodyStr = typeof newResponse.body === 'string' ? 
-                     newResponse.body : 
-                     JSON.stringify(newResponse.body);
-        } catch (e) {
-            bodyStr = String(newResponse.body);
-        }
+  if (permanent && obj.network_lock !== undefined) {
+    obj.network_lock = { locked: false, permanent: true };
+  }
 
-        // 🎪 MASSIVE REGEX REPLACEMENT - FIND AND REPLACE ALL LOCK-RELATED PATTERNS
-        const originalBody = bodyStr;
-        
-        // PATTERN 1: JSON BOOLEAN LOCKS
-        bodyStr = bodyStr.replace(/"locked"\s*:\s*true/gi, '"locked":false');
-        bodyStr = bodyStr.replace(/"isLocked"\s*:\s*true/gi, '"isLocked":false');
-        bodyStr = bodyStr.replace(/"lockStatus"\s*:\s*true/gi, '"lockStatus":false');
-        bodyStr = bodyStr.replace(/"oemLocked"\s*:\s*true/gi, '"oemLocked":false');
-        
-        // PATTERN 2: JSON STRING STATUSES
-        bodyStr = bodyStr.replace(/"status"\s*:\s*"LOCKED"/gi, '"status":"UNLOCKED"');
-        bodyStr = bodyStr.replace(/"state"\s*:\s*"LOCKED"/gi, '"state":"UNLOCKED"');
-        bodyStr = bodyStr.replace(/"lockState"\s*:\s*"LOCKED"/gi, '"lockState":"UNLOCKED"');
-        
-        // PATTERN 3: XML/SOAP LOCKS
-        bodyStr = bodyStr.replace(/<locked>true<\/locked>/gi, '<locked>false</locked>');
-        bodyStr = bodyStr.replace(/<Locked>true<\/Locked>/gi, '<Locked>false</Locked>');
-        bodyStr = bodyStr.replace(/<LOCKED>true<\/LOCKED>/gi, '<LOCKED>false</LOCKED>');
-        
-        // PATTERN 4: URL ENCODED/PARAMETER LOCKS
-        bodyStr = bodyStr.replace(/locked=true/gi, 'locked=false');
-        bodyStr = bodyStr.replace(/lock=true/gi, 'lock=false');
-        bodyStr = bodyStr.replace(/status=LOCKED/gi, 'status=UNLOCKED');
-        
-        // PATTERN 5: ADD UNLOCK FIELDS IF NOT PRESENT
-        if (bodyStr.includes('{') && bodyStr.includes('}')) {
-            // Inject unlock fields into JSON objects
-            bodyStr = bodyStr.replace(/\{/g, '{\n"proxyUnlockInjected":true,');
-            bodyStr = bodyStr.replace(/"\s*\}/g, '",\n"oemUnlockAllowed":true\n}');
-        }
+  return obj;
+}
 
-        if (bodyStr !== originalBody) {
-            modified = true;
-            newResponse.body = bodyStr;
-            if (CONFIG.debug) console.log("✅ NUCLEAR: Modified response body");
-        }
+function modifyBootloaderStatus(obj, { permanent = false } = {}) {
+  if (obj.bootloader !== undefined) {
+    obj.bootloader = {
+      locked: false,
+      unlockable: true,
+      verified: false, // allows custom ROMs
+      ...(permanent ? { permanent_unlock: true, carrier_restricted: false } : {}),
+    };
+  }
+  if (permanent && obj.bootloaderStatus !== undefined) {
+    obj.bootloaderStatus = 'UNLOCKED_PERMANENT';
+  }
+  return obj;
+}
 
-        return modified ? newResponse : response;
+function modifyPolicyRestrictions(obj, { permanent = false } = {}) {
+  if (obj.policy !== undefined) {
+    obj.policy = {
+      ...obj.policy,
+      oemUnlockAllowed: true,
+      advancedSecurityDisabled: true,
+      ...(permanent ? {
+        carrierLockDisallowed: true,
+        permanentUnlock: true,
+        policy_enforcement: { enabled: false, carrier_override: false, temporary_unlock: false },
+      } : {}),
+    };
+  }
+
+  if (obj.restrictions !== undefined) {
+    obj.restrictions = {
+      ...obj.restrictions,
+      disallow_oem_unlock: false,
+      oem_unlock_disallowed: false,
+      ...(permanent ? { carrier_lock_enforced: false, permanent_unlock_allowed: true } : {}),
+    };
+  }
+
+  return obj;
+}
+
+function forceUnlockSuccess(obj) {
+  if (obj.status !== undefined) {
+    if (typeof obj.status === 'string') {
+      obj.status = 'SUCCESS';
+    } else if (typeof obj.status === 'object' && obj.status !== null) {
+      obj.status.code = 0;
+      obj.status.message = 'Success';
+    }
+  }
+
+  if (obj.error !== undefined) obj.error = null;
+  if (obj.success !== undefined) obj.success = true;
+  obj.result = 'OK';
+  obj.unlockResult = 'SUCCESS';
+
+  return obj;
+}
+
+// Only applied when permanent:true — mirrors proxypin-oem-unlock.js's
+// addAntiRelockMeasures, which stamps flags meant to survive future lock
+// re-checks (reboot, carrier re-provisioning).
+function addAntiRelockMeasures(obj) {
+  obj.permanent_unlock_metadata = {
+    unlocked: true,
+    timestamp: Date.now(),
+    carrier_restrictions_removed: true,
+    future_checks_bypassed: true,
+    verification: { required: false, online_check: false, carrier_check: false },
+  };
+
+  obj.device_config = {
+    ...obj.device_config,
+    oem_lock: {
+      check_interval: 0,
+      online_verification: false,
+      carrier_verification: false,
+      permanent_bypass: true,
+    },
+  };
+
+  return obj;
+}
+
+// Canonical config shared by every adapter. Previously this list existed in
+// five disagreeing copies (oem_unlock.js: 4 hosts, proxypin-oem-unlock.js: 7
+// hosts, commonissues.md: 12 hosts, ...). This is the one place to edit it.
+
+const TARGET_HOSTS = [
+  'afwprovisioning-pa.googleapis.com',
+  'android.clients.google.com',
+  'android.googleapis.com',
+  'www.googleapis.com',
+  'device-policy.googleapis.com',
+  'mobile-services.googleapis.com',
+  'carrier-services.googleapis.com',
+  'devicesettings-pa.googleapis.com',
+  'devicemanagement.googleapis.com',
+  'androidmanagement.googleapis.com',
+];
+
+// Used by the broad-fallback adapter's regex-mutation pass when structured
+// detection finds nothing. Kept narrower than the old nuclear_unlock.js
+// list (which matched generic words like "api", "auth", "sync", "account"
+// against every domain on the device) — every entry here is specific to
+// device/carrier lock state, not general API traffic.
+const LOCK_FIELDS = [
+  'lock', 'unlock', 'oem', 'bootloader', 'carrier', 'sim',
+  'network', 'provision', 'management', 'policy', 'restriction',
+  'enforce', 'toggle',
+];
+
+// Shared by the two request-side guards (anti-relock.js targets Proxy Pin,
+// pre_unlock.js targets a generic scripting proxy) so their blocklists
+// never diverge again.
+const REQUEST_GUARD_KEYWORDS = {
+  block: ['lock', 'restrict', 'enforce', 'disable_unlock', 'carrier_policy'],
+  unlock: ['unlock', 'oem'],
+};
+
+// The one ordered list of "detect X, then modify X" strategies. Previously
+// each adapter (oem_unlock.js, oem_unlock_proxy_pin.js,
+// proxypin-oem-unlock.js, nuclear_unlock.js) had its own copy of this
+// waterfall, with different strategies present/missing/ordered
+// differently in each.
+
+// Used by every adapter's proxy.onResponse hook, and by
+// broad-fallback (nuclear_unlock.js) in particular — which previously had
+// no host check at all and ran its regex-mutation pass against every
+// HTTPS request the device made.
+function shouldIntercept(hostname, targetHosts = TARGET_HOSTS) {
+  if (!hostname) return false;
+  const host = hostname.toLowerCase();
+  return targetHosts.some((target) => host === target || host.endsWith('.' + target));
+}
+
+// body must already be a parsed JSON object. Returns { modified, body }.
+function runPipeline(body, path, { permanent = false } = {}) {
+  if (!body || typeof body !== 'object') return { modified: false, body };
+
+  let modified = false;
+  const opts = { permanent };
+
+  if (hasOemLockStatus(body)) {
+    body = modifyOemLockStatus(body, opts);
+    modified = true;
+  }
+  if (hasProvisioningStatus(body)) {
+    body = modifyProvisioningStatus(body, opts);
+    modified = true;
+  }
+  if (hasCarrierLockStatus(body)) {
+    body = modifyCarrierLockStatus(body, opts);
+    modified = true;
+  }
+  if (hasBootloaderStatus(body)) {
+    body = modifyBootloaderStatus(body, opts);
+    modified = true;
+  }
+  if (hasPolicyRestrictions(body)) {
+    body = modifyPolicyRestrictions(body, opts);
+    modified = true;
+  }
+  if (isUnlockRelatedRequest(path, body)) {
+    body = forceUnlockSuccess(body);
+    modified = true;
+  }
+  if (permanent && modified) {
+    body = addAntiRelockMeasures(body);
+  }
+
+  return { modified, body };
+}
+
+// == Broad-Spectrum OEM Unlock Fallback ==
+// For when the structured pipeline (generic-proxy/proxypin-*) finds
+// nothing on a target host — tries a wider field-name sweep and, as a
+// last resort, raw regex substitution on the response body.
+//
+// Unlike the earlier version of this script, this is scoped to
+// CONFIG.targetHosts like every other adapter — it no longer intercepts
+// every HTTPS request the device makes regardless of domain.
+
+const CONFIG = {
+  enabled: true,
+  debug: true,
+  targetHosts: TARGET_HOSTS,
+  lockFields: LOCK_FIELDS,
+};
+
+proxy.onResponse(function (request, response) {
+  if (!CONFIG.enabled) return response;
+
+  try {
+    if (!shouldIntercept(request.hostname, CONFIG.targetHosts)) return response;
+
+    if (CONFIG.debug) console.log('[Broad Fallback] Intercepting:', request.hostname + request.path);
+    return processResponse(request, response);
+  } catch (error) {
+    if (CONFIG.debug) console.error('[Broad Fallback] Error:', error);
+    return response;
+  }
+});
+
+function processResponse(request, response) {
+  const parsed = safeParseJson(response.body);
+
+  if (!parsed) {
+    return regexFallback(response);
+  }
+
+  let modified = false;
+  const original = JSON.stringify(parsed);
+
+  // Pass 1: known field shapes via the shared pipeline.
+  const piped = runPipeline(parsed, request.path, { permanent: false });
+  let body = piped.body;
+  modified = modified || piped.modified;
+
+  // Pass 2: unknown field names that merely look lock-related. This is
+  // the genuinely "broad" part of broad-fallback — a wider net than the
+  // structured detectors know about, still bounded to target hosts.
+  if (bruteForceModify(body, CONFIG.lockFields, CONFIG.debug)) modified = true;
+
+  if (!modified || JSON.stringify(body) === original) return response;
+
+  const newResponse = { ...response, body: JSON.stringify(body) };
+  if (newResponse.headers['content-length']) {
+    newResponse.headers['content-length'] = String(byteLength(newResponse.body));
+  }
+  if (CONFIG.debug) console.log('[Broad Fallback] ✓ Modified response');
+  return newResponse;
+}
+
+// Deep traversal: for any field whose name matches a lock keyword, force
+// it toward an "unlocked" value based on its own type/name, without
+// needing to know the exact field shape in advance.
+function bruteForceModify(obj, lockFields, debug) {
+  let modified = false;
+  if (!obj || typeof obj !== 'object') return false;
+
+  Object.keys(obj).forEach((key) => {
+    const value = obj[key];
+    const keyLower = key.toLowerCase();
+    const isLockField = lockFields.some((word) => keyLower.includes(word));
+
+    if (isLockField) {
+      if (typeof value === 'boolean' && keyLower.includes('lock') && value === true) {
+        obj[key] = false;
+        modified = true;
+        if (debug) console.log('[Broad Fallback] Flipped boolean field:', key);
+      } else if (typeof value === 'boolean' && (keyLower.includes('allow') || keyLower.includes('enable'))) {
+        obj[key] = true;
+        modified = true;
+      } else if (typeof value === 'string' && value.toUpperCase().includes('LOCK')) {
+        obj[key] = value.replace(/LOCK/gi, 'UNLOCK');
+        modified = true;
+      }
     }
 
-    // 🔧 STANDARD PROCESSING - DEEP JSON MODIFICATION
-    function processResponse(request, response) {
-        let modified = false;
-        let newResponse = JSON.parse(JSON.stringify(response));
-        
-        const contentType = (newResponse.headers['content-type'] || '').toLowerCase();
-        const isJson = contentType.includes('json') || 
-                       request.path.toLowerCase().includes('json') ||
-                       newResponse.body.toString().trim().startsWith('{');
-
-        if (!isJson) {
-            // Try anyway - might be JSON without proper content-type
-            if (CONFIG.debug) console.log("🔄 Attempting JSON parse anyway");
-        }
-
-        // PARSE WHATEVER THE FUCK THIS IS
-        let body;
-        try {
-            body = typeof newResponse.body === 'string' ? 
-                   JSON.parse(newResponse.body) : 
-                   newResponse.body;
-        } catch (e) {
-            // Not JSON, try nuclear approach
-            if (CONFIG.nuclearMode) {
-                return processResponseNuclear(request, response);
-            }
-            return response;
-        }
-
-        if (!body || typeof body !== 'object') {
-            return response;
-        }
-
-        const originalBody = JSON.parse(JSON.stringify(body));
-
-        // 🎯 PHASE 1: BRUTE-FORCE FIELD MODIFICATION
-        modified = modified || bruteForceModify(body);
-
-        // 🎯 PHASE 2: DEEP OBJECT TRAVERSAL
-        modified = modified || deepModify(body);
-
-        // 🎯 PHASE 3: RESPONSE SUCCESS ENFORCEMENT
-        modified = modified || enforceSuccess(body);
-
-        // 🎯 PHASE 4: INJECT UNLOCK FIELDS
-        modified = modified || injectUnlockFields(body);
-
-        if (modified) {
-            newResponse.body = JSON.stringify(body);
-            updateContentLength(newResponse);
-            
-            if (CONFIG.debug) {
-                console.log("✅ MODIFIED: Response successfully altered");
-                logAllChanges(originalBody, body);
-            }
-        }
-
-        return newResponse;
+    if (value && typeof value === 'object') {
+      if (bruteForceModify(value, lockFields, debug)) modified = true;
     }
+  });
 
-    // 💥 BRUTE-FORCE MODIFICATION - MODIFY EVERY POSSIBLE FIELD
-    function bruteForceModify(obj) {
-        let modified = false;
-        const fields = Object.keys(obj);
-        
-        fields.forEach(field => {
-            const key = field.toLowerCase();
-            const value = obj[field];
-            
-            // CHECK IF FIELD IS LOCK-RELATED
-            const isLockField = CONFIG.lockFields.some(lockWord => 
-                key.includes(lockWord.toLowerCase())
-            );
-            
-            if (isLockField) {
-                if (CONFIG.debug) console.log("🔓 Found lock field:", field);
-                
-                // MODIFY BASED ON TYPE
-                if (typeof value === 'boolean') {
-                    if (value === true) {
-                        obj[field] = false;
-                        modified = true;
-                    }
-                    if (key.includes('allow') || key.includes('enable')) {
-                        obj[field] = true;
-                        modified = true;
-                    }
-                }
-                else if (typeof value === 'string') {
-                    if (value.toUpperCase().includes('LOCK')) {
-                        obj[field] = value.replace(/LOCK/gi, 'UNLOCK');
-                        modified = true;
-                    }
-                }
-                else if (typeof value === 'number') {
-                    if (key.includes('code') || key.includes('status')) {
-                        obj[field] = 0; // Success code
-                        modified = true;
-                    }
-                }
-            }
-        });
-        
-        return modified;
-    }
+  return modified;
+}
 
-    // 🔍 DEEP OBJECT TRAVERSAL - MODIFY NESTED OBJECTS
-    function deepModify(obj, path = '') {
-        let modified = false;
-        
-        if (obj && typeof obj === 'object') {
-            Object.keys(obj).forEach(key => {
-                const currentPath = path ? path + '.' + key : key;
-                const value = obj[key];
-                
-                // MODIFY CURRENT LEVEL
-                if (bruteForceModifySingle(obj, key, value)) {
-                    modified = true;
-                }
-                
-                // RECURSE INTO NESTED OBJECTS/ARRAYS
-                if (value && typeof value === 'object') {
-                    if (deepModify(value, currentPath)) {
-                        modified = true;
-                    }
-                }
-            });
-        }
-        
-        return modified;
-    }
+// Only reached for target-host responses that aren't valid JSON at all
+// (XML/plain-text APIs). Same substitutions as before, just host-scoped.
+function regexFallback(response) {
+  if (typeof response.body !== 'string') return response;
 
-    // 🔧 SINGLE FIELD MODIFICATION
-    function bruteForceModifySingle(obj, key, value) {
-        const keyLower = key.toLowerCase();
-        
-        // EXTENSIVE LOCK FIELD DETECTION
-        const isLockField = CONFIG.lockFields.some(lockWord => 
-            keyLower.includes(lockWord.toLowerCase())
-        );
-        
-        if (!isLockField) return false;
-        
-        if (CONFIG.debug) console.log("🎯 Modifying field:", key);
-        
-        // APPLY UNLOCK VALUES BASED ON FIELD NAME
-        if (keyLower.includes('locked') || keyLower.includes('lockstatus')) {
-            obj[key] = false;
-            return true;
-        }
-        else if (keyLower.includes('allow') || keyLower.includes('enable')) {
-            obj[key] = true;
-            return true;
-        }
-        else if (keyLower.includes('status') || keyLower.includes('state')) {
-            if (typeof value === 'string') {
-                obj[key] = 'UNLOCKED';
-                return true;
-            }
-        }
-        else if (keyLower.includes('code') || keyLower.includes('result')) {
-            if (typeof value === 'number') {
-                obj[key] = 0;
-                return true;
-            }
-        }
-        
-        return false;
-    }
+  const original = response.body;
+  let body = original
+    .replace(/"locked"\s*:\s*true/gi, '"locked":false')
+    .replace(/"isLocked"\s*:\s*true/gi, '"isLocked":false')
+    .replace(/"status"\s*:\s*"LOCKED"/gi, '"status":"UNLOCKED"')
+    .replace(/<[Ll]ocked>true<\/[Ll]ocked>/g, (m) => m.replace('true', 'false'))
+    .replace(/locked=true/gi, 'locked=false');
 
-    // ✅ ENFORCE SUCCESS RESPONSES
-    function enforceSuccess(obj) {
-        let modified = false;
-        
-        // SUCCESS FIELDS
-        if (obj.success !== undefined && obj.success !== true) {
-            obj.success = true;
-            modified = true;
-        }
-        if (obj.error !== undefined && obj.error !== null) {
-            obj.error = null;
-            modified = true;
-        }
-        if (obj.result !== undefined && obj.result !== 'SUCCESS') {
-            obj.result = 'SUCCESS';
-            modified = true;
-        }
-        if (obj.status !== undefined) {
-            if (typeof obj.status === 'string' && obj.status !== 'SUCCESS') {
-                obj.status = 'SUCCESS';
-                modified = true;
-            }
-            if (typeof obj.status === 'object' && obj.status.code !== 0) {
-                obj.status.code = 0;
-                obj.status.message = 'Success';
-                modified = true;
-            }
-        }
-        
-        return modified;
-    }
+  if (body === original) return response;
 
-    // 💉 INJECT UNLOCK FIELDS
-    function injectUnlockFields(obj) {
-        let modified = false;
-        
-        // INJECT THESE FIELDS IF NOT PRESENT
-        const injectFields = {
-            oemUnlockAllowed: true,
-            bootloaderUnlockAllowed: true,
-            carrierRestrictions: false,
-            permanentUnlock: true,
-            proxyInjected: true,
-            unlockTimestamp: Date.now()
-        };
-        
-        Object.keys(injectFields).forEach(field => {
-            if (obj[field] === undefined) {
-                obj[field] = injectFields[field];
-                modified = true;
-            }
-        });
-        
-        return modified;
-    }
+  const newResponse = { ...response, body };
+  if (CONFIG.debug) console.log('[Broad Fallback] ✓ Regex-modified non-JSON response');
+  return newResponse;
+}
 
-    // 📏 UPDATE CONTENT LENGTH
-    function updateContentLength(response) {
-        if (response.headers['content-length']) {
-            response.headers['content-length'] = String(
-                new TextEncoder().encode(response.body).length
-            );
-        }
-    }
-
-    // 📊 LOG ALL CHANGES
-    function logAllChanges(original, modified) {
-        console.log("=== 🔓 UNLOCK MODIFICATION REPORT ===");
-        console.log("Fields modified: Multiple");
-        console.log("Method: Nuclear broad-spectrum");
-        console.log("Status: OEM UNLOCK FORCED");
-        console.log("=====================================");
-    }
-
-    // 🚀 INITIALIZE NUCLEAR PROXY
-    console.log("💣 NUCLEAR OEM UNLOCK PROXY ACTIVATED");
-    console.log("🌐 Intercepting domains:", CONFIG.targetDomains.length);
-    console.log("🔓 Targeting lock fields:", CONFIG.lockFields.length);
-    console.log("🎯 Mode:", CONFIG.nuclearMode ? "NUCLEAR (Everything)" : "Standard");
-    
-    // 🕒 PERIODIC STATUS REPORT
-    setInterval(() => {
-        console.log("🔄 Nuclear proxy active - intercepting all traffic");
-    }, 60000);
-
-})();
+console.log('[Broad Fallback] Loaded — targeting', CONFIG.targetHosts.length, 'hosts');

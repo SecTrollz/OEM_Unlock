@@ -1,393 +1,461 @@
-// == Proxy Pin OEM Unlock Script ==
-// Save this in Proxy Pin App > Scripts > oem-unlock.js
+// AUTO-GENERATED from src/core + src/adapters — do not hand-edit.
+// Edit the source and run 'npm run build' to regenerate this file.
 
-(function() {
-    'use strict';
+'use strict';
 
-    // Configuration
-    const CONFIG = {
-        enabled: true,
-        debug: true,
-        permanent: true, // Prevent relocking
-        targetHosts: [
-            "afwprovisioning-pa.googleapis.com",
-            "android.clients.google.com",
-            "android.googleapis.com", 
-            "www.googleapis.com",
-            "device-policy.googleapis.com",
-            "mobile-services.googleapis.com",
-            "carrier-services.googleapis.com"
-        ]
+function hasOemLockStatus(obj) {
+  return !!(obj && (
+    obj.oem_lock_status !== undefined ||
+    obj.oemUnlockStatus !== undefined ||
+    obj.unlockStatus !== undefined ||
+    (obj.status && typeof obj.status === 'object' && obj.status.oem_unlock !== undefined)
+  ));
+}
+
+function hasProvisioningStatus(obj) {
+  return !!(obj && (
+    obj.provisioningStatus !== undefined ||
+    obj.afwProvisioning !== undefined ||
+    obj.managementStatus !== undefined
+  ));
+}
+
+function hasCarrierLockStatus(obj) {
+  return !!(obj && (
+    obj.carrier_lock !== undefined ||
+    obj.simlock !== undefined ||
+    obj.network_lock !== undefined ||
+    obj.carrier_restrictions !== undefined
+  ));
+}
+
+function hasBootloaderStatus(obj) {
+  return !!(obj && (
+    obj.bootloader !== undefined ||
+    obj.bootloaderStatus !== undefined
+  ));
+}
+
+function hasPolicyRestrictions(obj) {
+  return !!(obj && (
+    obj.policy !== undefined ||
+    obj.restrictions !== undefined ||
+    obj.enterpriseConfig !== undefined
+  ));
+}
+
+function isUnlockRelatedRequest(path, obj) {
+  const unlockKeywords = [
+    'unlock', 'oem', 'bootloader', 'carrier', 'simlock',
+    'provisioning', 'afw', 'enterprise',
+  ];
+  const haystack = ((path || '') + JSON.stringify(obj || {})).toLowerCase();
+  return unlockKeywords.some((keyword) => haystack.includes(keyword));
+}
+
+function getNested(obj, path) {
+  return path.split('.').reduce((o, p) => (o ? o[p] : undefined), obj);
+}
+
+function setNested(obj, path, value) {
+  const keys = path.split('.');
+  const lastKey = keys.pop();
+  const target = keys.reduce((o, p) => (o[p] = o[p] || {}), obj);
+  target[lastKey] = value;
+}
+
+// oem_unlock.js used Buffer.byteLength, the Proxy Pin variants used
+// TextEncoder — pick whichever the runtime actually has instead of
+// assuming one.
+function byteLength(str) {
+  if (typeof Buffer !== 'undefined') return Buffer.byteLength(str);
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str).length;
+  return str.length;
+}
+
+// oem_unlock.js's ungzip() silently returned the still-compressed body if
+// no global Zlib was present, so a modification pass would then run against
+// binary garbage with no indication anything was wrong. This fails loudly
+// instead.
+function decompressGzip(body, headers) {
+  const encoding = ((headers && headers['content-encoding']) || '').toLowerCase();
+  if (encoding !== 'gzip') return { body, decompressed: false };
+
+  if (typeof Zlib !== 'undefined' && Zlib.gunzipSync) {
+    return { body: Zlib.gunzipSync(body).toString(), decompressed: true };
+  }
+
+  console.warn(
+    '[oem-unlock] gzip response received but no Zlib available in this ' +
+    'runtime — leaving body compressed, detectors will find nothing.'
+  );
+  return { body, decompressed: false };
+}
+
+function generateUnlockToken() {
+  return 'perm_unlock_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
+}
+
+// oem_unlock.js tried a plain JSON.parse then a wrapper-extraction regex;
+// the other three adapters didn't try the fallback at all and would just
+// give up on any non-strict-JSON body. One shared, best-effort parser.
+function safeParseJson(raw) {
+  if (raw && typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch (e2) {
+      return null;
+    }
+  }
+}
+
+// Consolidates modifyOemLockStatus/modifyProvisioningStatus/etc, which
+// previously existed as four separate hand-written copies (oem_unlock.js,
+// oem_unlock_proxy_pin.js, proxypin-oem-unlock.js, nuclear_unlock.js).
+// `permanent` toggles the extra anti-relock fields proxypin-oem-unlock.js
+// used to hardcode into its own private copy of these functions.
+
+function modifyOemLockStatus(obj, { permanent = false } = {}) {
+  const base = {
+    locked: false,
+    user_toggle_enabled: true,
+    enforced_by_carrier: false,
+    reason: 'OEM unlocking allowed',
+    supported: true,
+    modified_by_proxy: true,
+  };
+
+  const permanentFields = permanent ? {
+    carrier_enforceable: false,
+    permanent_unlock: true,
+    unlock_date: Date.now(),
+    unlock_reason: 'Permanent carrier unlock',
+    future_lock_prevention: {
+      allowed: false,
+      require_user_consent: true,
+      max_lock_duration: 0,
+      carrier_override_disabled: true,
+    },
+  } : {};
+
+  const merged = { ...base, ...permanentFields };
+
+  ['oem_lock_status', 'status.oem_unlock'].forEach((path) => {
+    setNested(obj, path, merged);
+  });
+  if (obj.oemUnlockStatus !== undefined) {
+    obj.oemUnlockStatus = { locked: false, unlockAllowed: true, userToggleable: true, ...permanentFields };
+  }
+
+  if (obj.oem_unlock_allowed !== undefined) obj.oem_unlock_allowed = true;
+  if (obj.isOemUnlockAllowed !== undefined) obj.isOemUnlockAllowed = true;
+  if (obj.unlockAllowed !== undefined) obj.unlockAllowed = true;
+  if (permanent) obj.permanent_unlock_granted = true;
+
+  return obj;
+}
+
+function modifyProvisioningStatus(obj, { permanent = false } = {}) {
+  if (obj.provisioningStatus !== undefined) {
+    obj.provisioningStatus = permanent ? 'COMPLETE_PERMANENT' : 'COMPLETE';
+    obj.isProvisioned = true;
+    obj.requiresOemUnlock = false;
+  }
+
+  if (obj.afwProvisioning !== undefined) {
+    obj.afwProvisioning = {
+      completed: true,
+      remainingSteps: 0,
+      canOemUnlock: true,
+      status: permanent ? 'SUCCESS_PERMANENT' : 'SUCCESS',
+      ...(permanent ? { permanent_unlock: true } : {}),
     };
+  }
 
-    // Main response interceptor
-    proxy.onResponse(function(request, response) {
-        if (!CONFIG.enabled) return response;
-        
-        try {
-            const url = request.url.toLowerCase();
-            const hostname = request.hostname.toLowerCase();
-            
-            // Check if this is a target host
-            const isTarget = CONFIG.targetHosts.some(target => 
-                hostname.includes(target.toLowerCase())
-            );
-            
-            if (!isTarget) return response;
+  if (permanent && obj.managementStatus !== undefined) {
+    obj.managementStatus = 'FULLY_MANAGED_UNLOCKED';
+  }
 
-            if (CONFIG.debug) {
-                console.log(`[OEM Unlock] Intercepting: ${hostname}${request.path}`);
-            }
+  return obj;
+}
 
-            return processOemUnlockResponse(request, response);
-            
-        } catch (error) {
-            if (CONFIG.debug) {
-                console.error("[OEM Unlock] Error:", error);
-            }
-            return response;
-        }
-    });
+function modifyCarrierLockStatus(obj, { permanent = false } = {}) {
+  if (obj.carrier_lock !== undefined) {
+    obj.carrier_lock = {
+      locked: false,
+      enforced: false,
+      can_unlock: true,
+      ...(permanent ? {
+        permanent_unlock: true,
+        enforceable: false,
+        unlock_token: generateUnlockToken(),
+        unlock_timestamp: Date.now(),
+      } : {}),
+    };
+  }
 
-    function processOemUnlockResponse(request, response) {
-        let modified = false;
-        let newResponse = JSON.parse(JSON.stringify(response));
-        
-        // Check content type
-        const contentType = (newResponse.headers['content-type'] || '').toLowerCase();
-        if (!contentType.includes('application/json') && 
-            !contentType.includes('text/json') &&
-            !request.path.toLowerCase().includes('json')) {
-            return response;
-        }
+  if (obj.simlock !== undefined) {
+    obj.simlock = permanent
+      ? { locked: false, state: 'UNLOCKED_PERMANENT', network_subset: false, service_provider: false, corporate: false, sim: false }
+      : { locked: false, state: 'UNLOCKED' };
+  }
 
-        // Parse response body
-        let body;
-        try {
-            body = typeof newResponse.body === 'string' ? 
-                   JSON.parse(newResponse.body) : newResponse.body;
-        } catch (e) {
-            return response;
-        }
+  if (permanent && obj.network_lock !== undefined) {
+    obj.network_lock = { locked: false, permanent: true };
+  }
 
-        if (!body || typeof body !== 'object') return response;
+  return obj;
+}
 
-        const originalBody = JSON.parse(JSON.stringify(body));
+function modifyBootloaderStatus(obj, { permanent = false } = {}) {
+  if (obj.bootloader !== undefined) {
+    obj.bootloader = {
+      locked: false,
+      unlockable: true,
+      verified: false, // allows custom ROMs
+      ...(permanent ? { permanent_unlock: true, carrier_restricted: false } : {}),
+    };
+  }
+  if (permanent && obj.bootloaderStatus !== undefined) {
+    obj.bootloaderStatus = 'UNLOCKED_PERMANENT';
+  }
+  return obj;
+}
 
-        // == CORE UNLOCK MODIFICATIONS ==
-        
-        // 1. OEM Lock Status - Immediate unlock
-        if (hasOemLockStatus(body)) {
-            body = modifyOemLockStatus(body, request);
-            modified = true;
-        }
+function modifyPolicyRestrictions(obj, { permanent = false } = {}) {
+  if (obj.policy !== undefined) {
+    obj.policy = {
+      ...obj.policy,
+      oemUnlockAllowed: true,
+      advancedSecurityDisabled: true,
+      ...(permanent ? {
+        carrierLockDisallowed: true,
+        permanentUnlock: true,
+        policy_enforcement: { enabled: false, carrier_override: false, temporary_unlock: false },
+      } : {}),
+    };
+  }
 
-        // 2. Carrier Restrictions - Permanent removal
-        if (hasCarrierRestrictions(body)) {
-            body = removeCarrierRestrictions(body);
-            modified = true;
-        }
+  if (obj.restrictions !== undefined) {
+    obj.restrictions = {
+      ...obj.restrictions,
+      disallow_oem_unlock: false,
+      oem_unlock_disallowed: false,
+      ...(permanent ? { carrier_lock_enforced: false, permanent_unlock_allowed: true } : {}),
+    };
+  }
 
-        // 3. Provisioning Status - Complete provisioning
-        if (hasProvisioningStatus(body)) {
-            body = completeProvisioning(body);
-            modified = true;
-        }
+  return obj;
+}
 
-        // 4. Policy Enforcement - Disable carrier policies
-        if (hasPolicyEnforcement(body)) {
-            body = disablePolicyEnforcement(body);
-            modified = true;
-        }
-
-        // 5. Future Lock Prevention - Anti-relock measures
-        if (isUnlockRelated(request, body)) {
-            body = addAntiRelockMeasures(body);
-            modified = true;
-        }
-
-        // 6. Bootloader Status - Enable bootloader unlock
-        if (hasBootloaderStatus(body)) {
-            body = enableBootloaderUnlock(body);
-            modified = true;
-        }
-
-        if (modified) {
-            newResponse.body = JSON.stringify(body);
-            
-            // Update content length
-            updateContentLength(newResponse);
-            
-            if (CONFIG.debug) {
-                logUnlockSuccess(originalBody, body, request);
-            }
-            
-            // Save unlock state to prevent relocking
-            saveUnlockState(request, body);
-        }
-
-        return newResponse;
+function forceUnlockSuccess(obj) {
+  if (obj.status !== undefined) {
+    if (typeof obj.status === 'string') {
+      obj.status = 'SUCCESS';
+    } else if (typeof obj.status === 'object' && obj.status !== null) {
+      obj.status.code = 0;
+      obj.status.message = 'Success';
     }
+  }
 
-    // == PERMANENT UNLOCK FUNCTIONS ==
+  if (obj.error !== undefined) obj.error = null;
+  if (obj.success !== undefined) obj.success = true;
+  obj.result = 'OK';
+  obj.unlockResult = 'SUCCESS';
 
-    function modifyOemLockStatus(body, request) {
-        console.log("[Permanent Unlock] Modifying OEM lock status");
-        
-        const permanentUnlock = {
-            locked: false,
-            user_toggle_enabled: true,
-            enforced_by_carrier: false,
-            carrier_enforceable: false, // Critical: Prevents future enforcement
-            permanent_unlock: true,
-            unlock_date: Date.now(),
-            unlock_reason: "Permanent carrier unlock via Proxy Pin",
-            future_lock_prevention: {
-                allowed: false,
-                require_user_consent: true,
-                max_lock_duration: 0,
-                carrier_override_disabled: true
-            }
-        };
+  return obj;
+}
 
-        // Apply to all possible OEM lock paths
-        if (body.oem_lock_status) {
-            body.oem_lock_status = {...body.oem_lock_status, ...permanentUnlock};
-        }
-        if (body.oemUnlockStatus) {
-            body.oemUnlockStatus = {...body.oemUnlockStatus, ...permanentUnlock};
-        }
-        if (body.status && body.status.oem_unlock) {
-            body.status.oem_unlock = {...body.status.oem_unlock, ...permanentUnlock};
-        }
+// Only applied when permanent:true — mirrors proxypin-oem-unlock.js's
+// addAntiRelockMeasures, which stamps flags meant to survive future lock
+// re-checks (reboot, carrier re-provisioning).
+function addAntiRelockMeasures(obj) {
+  obj.permanent_unlock_metadata = {
+    unlocked: true,
+    timestamp: Date.now(),
+    carrier_restrictions_removed: true,
+    future_checks_bypassed: true,
+    verification: { required: false, online_check: false, carrier_check: false },
+  };
 
-        // Set direct flags
-        body.oem_unlock_allowed = true;
-        body.isOemUnlockAllowed = true;
-        body.unlockAllowed = true;
-        body.permanent_unlock_granted = true;
+  obj.device_config = {
+    ...obj.device_config,
+    oem_lock: {
+      check_interval: 0,
+      online_verification: false,
+      carrier_verification: false,
+      permanent_bypass: true,
+    },
+  };
 
-        return body;
+  return obj;
+}
+
+// Canonical config shared by every adapter. Previously this list existed in
+// five disagreeing copies (oem_unlock.js: 4 hosts, proxypin-oem-unlock.js: 7
+// hosts, commonissues.md: 12 hosts, ...). This is the one place to edit it.
+
+const TARGET_HOSTS = [
+  'afwprovisioning-pa.googleapis.com',
+  'android.clients.google.com',
+  'android.googleapis.com',
+  'www.googleapis.com',
+  'device-policy.googleapis.com',
+  'mobile-services.googleapis.com',
+  'carrier-services.googleapis.com',
+  'devicesettings-pa.googleapis.com',
+  'devicemanagement.googleapis.com',
+  'androidmanagement.googleapis.com',
+];
+
+// Used by the broad-fallback adapter's regex-mutation pass when structured
+// detection finds nothing. Kept narrower than the old nuclear_unlock.js
+// list (which matched generic words like "api", "auth", "sync", "account"
+// against every domain on the device) — every entry here is specific to
+// device/carrier lock state, not general API traffic.
+const LOCK_FIELDS = [
+  'lock', 'unlock', 'oem', 'bootloader', 'carrier', 'sim',
+  'network', 'provision', 'management', 'policy', 'restriction',
+  'enforce', 'toggle',
+];
+
+// Shared by the two request-side guards (anti-relock.js targets Proxy Pin,
+// pre_unlock.js targets a generic scripting proxy) so their blocklists
+// never diverge again.
+const REQUEST_GUARD_KEYWORDS = {
+  block: ['lock', 'restrict', 'enforce', 'disable_unlock', 'carrier_policy'],
+  unlock: ['unlock', 'oem'],
+};
+
+// The one ordered list of "detect X, then modify X" strategies. Previously
+// each adapter (oem_unlock.js, oem_unlock_proxy_pin.js,
+// proxypin-oem-unlock.js, nuclear_unlock.js) had its own copy of this
+// waterfall, with different strategies present/missing/ordered
+// differently in each.
+
+// Used by every adapter's proxy.onResponse hook, and by
+// broad-fallback (nuclear_unlock.js) in particular — which previously had
+// no host check at all and ran its regex-mutation pass against every
+// HTTPS request the device made.
+function shouldIntercept(hostname, targetHosts = TARGET_HOSTS) {
+  if (!hostname) return false;
+  const host = hostname.toLowerCase();
+  return targetHosts.some((target) => host === target || host.endsWith('.' + target));
+}
+
+// body must already be a parsed JSON object. Returns { modified, body }.
+function runPipeline(body, path, { permanent = false } = {}) {
+  if (!body || typeof body !== 'object') return { modified: false, body };
+
+  let modified = false;
+  const opts = { permanent };
+
+  if (hasOemLockStatus(body)) {
+    body = modifyOemLockStatus(body, opts);
+    modified = true;
+  }
+  if (hasProvisioningStatus(body)) {
+    body = modifyProvisioningStatus(body, opts);
+    modified = true;
+  }
+  if (hasCarrierLockStatus(body)) {
+    body = modifyCarrierLockStatus(body, opts);
+    modified = true;
+  }
+  if (hasBootloaderStatus(body)) {
+    body = modifyBootloaderStatus(body, opts);
+    modified = true;
+  }
+  if (hasPolicyRestrictions(body)) {
+    body = modifyPolicyRestrictions(body, opts);
+    modified = true;
+  }
+  if (isUnlockRelatedRequest(path, body)) {
+    body = forceUnlockSuccess(body);
+    modified = true;
+  }
+  if (permanent && modified) {
+    body = addAntiRelockMeasures(body);
+  }
+
+  return { modified, body };
+}
+
+// == Proxy Pin OEM Unlock Script ==
+// Runtime: Proxy Pin Android app (Settings > Script Management).
+// Runs the pipeline in permanent mode: adds anti-relock metadata on top of
+// the standard unlock fields, meant to survive future carrier re-checks.
+
+const CONFIG = {
+  enabled: true,
+  debug: true,
+  permanent: true,
+  targetHosts: TARGET_HOSTS,
+};
+
+proxy.onResponse(function (request, response) {
+  if (!CONFIG.enabled) return response;
+
+  try {
+    if (!shouldIntercept(request.hostname, CONFIG.targetHosts)) return response;
+
+    if (CONFIG.debug) console.log(`[OEM Unlock] Intercepting: ${request.hostname}${request.path}`);
+    return processOemUnlockResponse(request, response);
+  } catch (error) {
+    if (CONFIG.debug) console.error('[OEM Unlock] Error:', error);
+    return response;
+  }
+});
+
+function processOemUnlockResponse(request, response) {
+  const contentType = (response.headers['content-type'] || '').toLowerCase();
+  const isJson = contentType.includes('json') || request.path.toLowerCase().includes('json');
+  if (!isJson) return response;
+
+  const parsedBody = safeParseJson(response.body);
+  if (!parsedBody) return response;
+
+  const { modified, body } = runPipeline(parsedBody, request.path, { permanent: CONFIG.permanent });
+  if (!modified) return response;
+
+  const newResponse = { ...response, body: JSON.stringify(body) };
+  if (newResponse.headers['content-length']) {
+    newResponse.headers['content-length'] = String(byteLength(newResponse.body));
+  }
+
+  if (CONFIG.debug) {
+    console.log('=== OEM UNLOCK SUCCESS ===');
+    console.log('Host: ' + request.hostname + request.path);
+    console.log('Permanent unlock: ENABLED, anti-relock: ACTIVATED');
+  }
+
+  saveUnlockState(request);
+  return newResponse;
+}
+
+function saveUnlockState(request) {
+  try {
+    const unlockState = {
+      timestamp: Date.now(),
+      hostname: request.hostname,
+      path: request.path,
+      permanent: true,
+      token: generateUnlockToken(),
+    };
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('oem_unlock_state', JSON.stringify(unlockState));
     }
+  } catch (e) {
+    // Storage unavailable in this runtime — non-fatal, response is still modified.
+  }
+}
 
-    function removeCarrierRestrictions(body) {
-        console.log("[Permanent Unlock] Removing carrier restrictions");
-        
-        const carrierUnlock = {
-            carrier_lock: {
-                locked: false,
-                permanent_unlock: true,
-                enforceable: false, // Prevents future locking
-                unlock_token: generateUnlockToken(),
-                unlock_timestamp: Date.now()
-            },
-            simlock: {
-                locked: false,
-                state: "UNLOCKED_PERMANENT",
-                network_subset: false,
-                service_provider: false,
-                corporate: false,
-                sim: false
-            },
-            network_lock: {
-                locked: false,
-                permanent: true
-            }
-        };
-
-        return {...body, ...carrierUnlock};
-    }
-
-    function completeProvisioning(body) {
-        console.log("[Permanent Unlock] Completing provisioning");
-        
-        body.provisioningStatus = "COMPLETE_PERMANENT";
-        body.afwProvisioning = {
-            completed: true,
-            remainingSteps: 0,
-            canOemUnlock: true,
-            permanent_unlock: true,
-            status: "SUCCESS_PERMANENT"
-        };
-        body.managementStatus = "FULLY_MANAGED_UNLOCKED";
-        
-        return body;
-    }
-
-    function disablePolicyEnforcement(body) {
-        console.log("[Permanent Unlock] Disabling policy enforcement");
-        
-        body.policy = {
-            ...body.policy,
-            oemUnlockAllowed: true,
-            advancedSecurityDisabled: true,
-            carrierLockDisallowed: true, // Prevents carrier policies
-            permanentUnlock: true,
-            policy_enforcement: {
-                enabled: false,
-                carrier_override: false,
-                temporary_unlock: false
-            }
-        };
-        
-        body.restrictions = {
-            ...body.restrictions,
-            disallow_oem_unlock: false,
-            oem_unlock_disallowed: false,
-            carrier_lock_enforced: false,
-            permanent_unlock_allowed: true
-        };
-        
-        return body;
-    }
-
-    function addAntiRelockMeasures(body) {
-        console.log("[Permanent Unlock] Adding anti-relock measures");
-        
-        // Add permanent unlock flags that persist across reboots
-        body.permanent_unlock_metadata = {
-            unlocked: true,
-            timestamp: Date.now(),
-            method: "proxy_pin_permanent",
-            carrier_restrictions_removed: true,
-            future_checks_bypassed: true,
-            verification: {
-                required: false,
-                online_check: false,
-                carrier_check: false
-            }
-        };
-        
-        // Disable future lock checks
-        body.device_config = {
-            ...body.device_config,
-            oem_lock: {
-                check_interval: 0, // Never check again
-                online_verification: false,
-                carrier_verification: false,
-                permanent_bypass: true
-            }
-        };
-        
-        return body;
-    }
-
-    function enableBootloaderUnlock(body) {
-        console.log("[Permanent Unlock] Enabling bootloader unlock");
-        
-        body.bootloader = {
-            locked: false,
-            unlockable: true,
-            verified: false,
-            permanent_unlock: true,
-            carrier_restricted: false
-        };
-        
-        body.bootloaderStatus = "UNLOCKED_PERMANENT";
-        
-        return body;
-    }
-
-    // == HELPER FUNCTIONS ==
-
-    function hasOemLockStatus(obj) {
-        return obj && (
-            obj.oem_lock_status !== undefined ||
-            obj.oemUnlockStatus !== undefined ||
-            obj.unlockStatus !== undefined ||
-            (obj.status && obj.status.oem_unlock !== undefined)
-        );
-    }
-
-    function hasCarrierRestrictions(obj) {
-        return obj && (
-            obj.carrier_lock !== undefined ||
-            obj.simlock !== undefined ||
-            obj.network_lock !== undefined ||
-            obj.carrier_restrictions !== undefined
-        );
-    }
-
-    function hasProvisioningStatus(obj) {
-        return obj && (
-            obj.provisioningStatus !== undefined ||
-            obj.afwProvisioning !== undefined ||
-            obj.managementStatus !== undefined
-        );
-    }
-
-    function hasPolicyEnforcement(obj) {
-        return obj && (
-            obj.policy !== undefined ||
-            obj.restrictions !== undefined ||
-            obj.enterpriseConfig !== undefined
-        );
-    }
-
-    function hasBootloaderStatus(obj) {
-        return obj && (
-            obj.bootloader !== undefined ||
-            obj.bootloaderStatus !== undefined
-        );
-    }
-
-    function isUnlockRelated(request, body) {
-        const unlockKeywords = ['unlock', 'oem', 'bootloader', 'carrier', 'provisioning'];
-        const requestStr = (request.path + JSON.stringify(body)).toLowerCase();
-        return unlockKeywords.some(keyword => requestStr.includes(keyword));
-    }
-
-    function generateUnlockToken() {
-        return 'perm_unlock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    }
-
-    function updateContentLength(response) {
-        if (response.headers['content-length']) {
-            response.headers['content-length'] = String(
-                new TextEncoder().encode(response.body).length
-            );
-        }
-    }
-
-    function saveUnlockState(request, modifiedBody) {
-        // Store unlock state in app storage for persistence
-        try {
-            const unlockState = {
-                timestamp: Date.now(),
-                hostname: request.hostname,
-                path: request.path,
-                original_locked: false, // We assume we've unlocked it
-                permanent: true,
-                token: generateUnlockToken()
-            };
-            
-            // Proxy Pin app might have storage API, or use localStorage模拟
-            if (typeof localStorage !== 'undefined') {
-                localStorage.setItem('oem_unlock_state', JSON.stringify(unlockState));
-            }
-        } catch (e) {
-            // Silent fail
-        }
-    }
-
-    function logUnlockSuccess(original, modified, request) {
-        console.log("=== OEM UNLOCK SUCCESS ===");
-        console.log("Host: " + request.hostname + request.path);
-        
-        if (original.oem_lock_status) {
-            console.log("OEM Lock: " + original.oem_lock_status.locked + " → " + modified.oem_lock_status.locked);
-        }
-        if (original.carrier_lock) {
-            console.log("Carrier Lock: " + original.carrier_lock.locked + " → " + modified.carrier_lock.locked);
-        }
-        
-        console.log("Permanent Unlock: ENABLED");
-        console.log("Anti-Relock: ACTIVATED");
-        console.log("========================");
-    }
-
-    // Initialize
-    console.log("[Permanent OEM Unlock] Proxy Pin script loaded and active");
-    console.log("[Permanent OEM Unlock] Target hosts: " + CONFIG.targetHosts.join(', '));
-
-})();
+console.log('[Permanent OEM Unlock] Proxy Pin script loaded and active');
+console.log('[Permanent OEM Unlock] Target hosts: ' + CONFIG.targetHosts.join(', '));

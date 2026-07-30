@@ -53,14 +53,32 @@ Device Requirements
 · Bootloader in factory state (not previously unlocked)
 · Physical access to the device
 
+📁 Project Layout
+
+The scripts you paste into your proxy tool (`oem_unlock.js`, `nuclear_unlock.js`,
+etc.) are **generated** from `src/core/` + `src/adapters/` — that's the
+actual source of truth, and where fixes/new fields should be made. Run
+`npm run build` after editing anything in `src/` to regenerate them. See
+[`ARCHITECTURE.md`](ARCHITECTURE.md) for the full breakdown of what each
+file does and why it's structured this way.
+
 🚀 Installation & Setup
+
+0. Build the scripts (no dependencies to install)
+
+```bash
+git clone <your-repo>
+cd OEM_Unlock
+npm run build   # regenerates oem_unlock.js and friends from src/
+npm test        # optional: runs the unit tests for the core unlock logic
+```
 
 1. Proxy Configuration
 
 ```bash
 # Using MITMproxy (Python)
 pip install mitmproxy
-mitmproxy -s oem_unlock_proxy.js
+mitmproxy -s oem_unlock.js
 
 # Using Burp Suite
 # Import the script via Extender > BApp Store > Custom Script
@@ -165,11 +183,15 @@ OEM Unlock Still Greyed Out
 
 Debug Mode
 
-Enable additional logging by uncommenting debug sections in the script:
+Every generated script has a `CONFIG.debug` flag at the top (already
+`true` by default) that controls verbose logging:
 
 ```javascript
-// Set to true for verbose logging
-const DEBUG_MODE = true;
+const CONFIG = {
+    enabled: true,
+    debug: true, // set false to quiet the console output
+    // ...
+};
 ```
 
 📝 Legal & Ethical Notes

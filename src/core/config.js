@@ -1,11 +1,8 @@
-// AUTO-GENERATED from src/core + src/adapters — do not hand-edit.
-// Edit the source and run 'npm run build' to regenerate this file.
-
-'use strict';
-
 // Canonical config shared by every adapter. Previously this list existed in
 // five disagreeing copies (oem_unlock.js: 4 hosts, proxypin-oem-unlock.js: 7
 // hosts, commonissues.md: 12 hosts, ...). This is the one place to edit it.
+
+'use strict';
 
 const TARGET_HOSTS = [
   'afwprovisioning-pa.googleapis.com',
@@ -39,41 +36,4 @@ const REQUEST_GUARD_KEYWORDS = {
   unlock: ['unlock', 'oem'],
 };
 
-// == Pre-Unlock Request Modifier ==
-// Runtime: generic scripting proxy, request-side hook.
-// Strips unlock restrictions and forces unlock commands to be accepted on
-// outgoing requests to Google APIs.
-
-proxy.onRequest(function (request) {
-  if (!request.hostname.includes('googleapis.com') || typeof request.body !== 'string') {
-    return request;
-  }
-
-  try {
-    const reqBody = JSON.parse(request.body);
-    let modified = false;
-
-    if (reqBody.restrictions) {
-      delete reqBody.restrictions.disallow_oem_unlock;
-      delete reqBody.restrictions.oem_unlock_disallowed;
-      modified = true;
-    }
-
-    const isUnlockCommand = reqBody.command === 'UNLOCK_DEVICE' ||
-      REQUEST_GUARD_KEYWORDS.unlock.includes(reqBody.action);
-    if (isUnlockCommand) {
-      reqBody.force = true;
-      reqBody.bypass = true;
-      modified = true;
-    }
-
-    if (modified) {
-      request.body = JSON.stringify(reqBody);
-      console.log('[OEM Unlock] Modified outgoing request to force unlock');
-    }
-  } catch (e) {
-    // Not JSON — leave the request untouched.
-  }
-
-  return request;
-});
+module.exports = { TARGET_HOSTS, LOCK_FIELDS, REQUEST_GUARD_KEYWORDS };
