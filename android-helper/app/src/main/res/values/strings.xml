@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OEM Unlock Helper</string>
+
+    <string name="shizuku_status_checking">Checking Shizuku…</string>
+    <string name="shizuku_status_not_running">Shizuku isn\'t running. Install and start it first, then reopen this app.</string>
+    <string name="shizuku_status_needs_permission">Shizuku is running — tap below to grant this app permission.</string>
+    <string name="shizuku_status_ready">Shizuku permission granted — ready to go.</string>
+
+    <string name="request_permission">Request Shizuku Permission</string>
+
+    <string name="proxy_section_title">Set device proxy</string>
+    <string name="proxy_host_hint">Computer\'s IP address (e.g. 192.168.1.42)</string>
+    <string name="proxy_port_hint">Port</string>
+    <string name="set_proxy">Set Proxy</string>
+    <string name="clear_proxy">Clear Proxy</string>
+
+    <string name="diagnostic_section_title">System certificate check (diagnostic only)</string>
+    <string name="diagnostic_explainer">This checks whether your device would allow a certificate to be trusted at the system level — it does not install anything. Most locked-bootloader devices will report \"not allowed\", which matches what a non-rooted device is expected to do.</string>
+    <string name="run_diagnostic">Check System Write Access</string>
+
+    <string name="result_label">Result:</string>
+</resources>

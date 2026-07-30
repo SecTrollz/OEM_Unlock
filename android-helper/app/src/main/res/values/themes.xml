@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.OemUnlockHelper" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/accent_unlock</item>
+        <item name="colorPrimaryDark">@color/ink</item>
+        <item name="colorAccent">@color/accent_network</item>
+        <item name="android:statusBarColor">@color/ink</item>
+    </style>
+</resources>

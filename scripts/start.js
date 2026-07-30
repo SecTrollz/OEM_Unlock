@@ -69,7 +69,11 @@ On your phone:
   Settings → Wi-Fi → tap your network → Modify network → Advanced
   Set "Proxy" to Manual
   Proxy hostname: ${ip || '<this computer\'s IP address>'}
-  Proxy port: ${PROXY_PORT}`);
+  Proxy port: ${PROXY_PORT}
+
+(Tip: android-helper/ has an optional companion app that sets this for
+you with a tap, using Shizuku instead of typing it into Wi-Fi settings —
+see android-helper/README.md if you'd rather build that once.)`);
   await pause('Go do that now.');
 
   heading('STEP 2 of 4 — Install the security certificate');

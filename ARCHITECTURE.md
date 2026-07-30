@@ -93,6 +93,23 @@ converges on watching for.
 |---|---|
 | `mock-server.js` | Node `http` server on port 3000 serving canned JSON for `/v1/device/provisioning` and `/v1/device/unlock`, for testing without hitting real Google endpoints. Run via `npm run start-offline` (or `npm start` when `mitmproxy` isn't found). |
 
+### `android-helper/` — separate optional sub-project
+
+A companion Android app (Kotlin/Gradle, not Node/JS) that uses
+[Shizuku](https://shizuku.rikka.app/) to run
+`settings put global http_proxy ...` with a tap, instead of the manual
+Wi-Fi-settings step `scripts/start.js`'s wizard otherwise walks through.
+It's deliberately kept out of `src/core`/`build.js`/`npm test` — different
+language, different toolchain (Android SDK, not Node), and it doesn't need
+to regenerate alongside the six proxy scripts since it's not one of them.
+See `android-helper/README.md` for what it does, its build instructions,
+and an explicit caveat: it was written against Shizuku's documented public
+API but never compiled, since this repo's dev environment has no Android
+SDK to build it with. Also includes a diagnostic-only check for whether a
+given device would allow a system-trusted certificate — it deliberately
+does not attempt the install itself (see that README's "Why no system
+cert install" section for the reasoning).
+
 ### Documentation
 
 | File | Role |
