@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simplified launcher icon, same shield + open padlock mark as
+     assets/logo-mark.svg (see BRANDING.md) so the app matches the rest
+     of the project's identity. Plain drawable, not a full adaptive-icon
+     mipmap set, to keep this buildable without extra density assets. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+
+    <path
+        android:pathData="M32 4 L54 12 L54 30 C54 46 44 56 32 60 C20 56 10 46 10 30 L10 12 Z"
+        android:fillColor="#0B0F14"
+        android:strokeColor="#35D48A"
+        android:strokeWidth="2.5" />
+
+    <path
+        android:pathData="M21 34 L43 34 L43 50 L21 50 Z"
+        android:fillColor="#E6EDF3" />
+
+    <path
+        android:pathData="M25.5 34 V27 A6.5 6.5 0 0 1 38.5 27 V31"
+        android:strokeColor="#35D48A"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+</vector>

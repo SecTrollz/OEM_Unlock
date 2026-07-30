@@ -85,6 +85,12 @@ setup` does the same build-and-cert step non-interactively and exits.
 `npm start -- --offline` skips straight to a local test server, no phone
 required — useful for trying things out first.
 
+**Optional:** [`android-helper/`](android-helper/) is a companion Android
+app that uses [Shizuku](https://shizuku.rikka.app/) to set the device
+proxy with a tap instead of typing it into Wi-Fi settings by hand. It's a
+separate Kotlin/Gradle project with its own build step — see its README
+for setup and for an important caveat about what's and isn't been tested.
+
 🛠️ Usage Instructions
 
 `npm start` is the whole flow. It figures out which method fits your setup

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same token names/values as BRANDING.md's color system, §3. -->
+<resources>
+    <color name="ink">#0B0F14</color>
+    <color name="paper">#E6EDF3</color>
+    <color name="accent_network">#38BDF8</color>
+    <color name="accent_unlock">#35D48A</color>
+    <color name="accent_warning">#F5A623</color>
+    <color name="neutral_mid">#7C8B9A</color>
+</resources>
