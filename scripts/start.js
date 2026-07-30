@@ -1,64 +1,171 @@
 #!/usr/bin/env node
-// Single run command: `npm start`.
+// The one command: `npm start`.
 //
-// If mitmproxy is installed, this launches it with oem_unlock.js already
-// loaded — that's the whole "run" step for the desktop-proxy workflow.
-// After it prints "ready", go to your phone and dial your carrier's
-// SIM-unlock USSD trigger code: Android's AFW provisioning check fires
-// right after, this proxy intercepts it, and the response is rewritten to
-// say the unlock is allowed.
+// Builds everything, then walks you through the rest one plain-language
+// step at a time — pausing after each one so you can go do it on your
+// phone before coming back. No prior knowledge of proxies, certificates,
+// or Android settings assumed; every step says exactly what to tap.
 //
-// If you're using the Proxy Pin Android app instead, there's no desktop
-// process to launch — Proxy Pin runs entirely on the phone. `npm start`
-// prints that reminder instead of pretending to automate something it
-// can't reach, and offers the offline mock server as a fallback so this
-// command always does something useful.
+// `npm start -- --offline` skips straight to the local test server,
+// no phone required.
 
 'use strict';
 
-const { spawn, spawnSync } = require('child_process');
+const readline = require('readline');
+const { spawn } = require('child_process');
 const path = require('path');
+const {
+  ROOT,
+  PROXY_PORT,
+  hasBinary,
+  buildScripts,
+  ensureCert,
+  getLocalIp,
+} = require('./lib');
 
-const ROOT = path.join(__dirname, '..');
 const offlineOnly = process.argv.includes('--offline');
+const isTTY = Boolean(process.stdin.isTTY);
 
-function hasBinary(cmd) {
-  const result = spawnSync(process.platform === 'win32' ? 'where' : 'which', [cmd]);
-  return result.status === 0;
+function bold(s) {
+  return isTTY ? `\x1b[1m${s}\x1b[0m` : s;
+}
+
+function heading(text) {
+  console.log('\n' + bold(text));
+  console.log(bold('-'.repeat(text.length)));
+}
+
+// Pauses for the user to go do something on their phone, then continue.
+// If there's no interactive terminal attached (CI, piped input), don't
+// hang — just note that and move on immediately.
+function pause(message) {
+  if (!isTTY) {
+    console.log(`${message}\n(no interactive terminal detected — continuing automatically)\n`);
+    return Promise.resolve();
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(`${message}\n>>> Press ENTER when you've done this... `, () => {
+      rl.close();
+      console.log('');
+      resolve();
+    });
+  });
 }
 
 function startOfflineMockServer() {
-  console.log('\nStarting the offline mock server (npm run start-offline) on http://localhost:3000 ...');
-  spawn(process.execPath, [path.join(ROOT, 'mock-server.js')], { cwd: ROOT, stdio: 'inherit' });
+  console.log('\nStarting the local test server on http://localhost:3000 ...\n');
+  return spawn(process.execPath, [path.join(ROOT, 'mock-server.js')], { cwd: ROOT, stdio: 'inherit' });
 }
 
-if (offlineOnly) {
-  startOfflineMockServer();
-} else if (hasBinary('mitmproxy')) {
-  console.log('Found mitmproxy — launching with oem_unlock.js loaded on port 8080.\n');
-  console.log('Once you see "Proxy script loaded" below, go to your phone:');
-  console.log('  1. Confirm the device proxy points at this machine (see `npm run setup`)');
-  console.log('  2. Open the dialer and enter your carrier\'s SIM-unlock USSD trigger code');
-  console.log('  3. Watch this terminal for [OEM Unlock] log lines\n');
+async function runDesktopProxyPath() {
+  const ip = getLocalIp();
 
+  heading('STEP 1 of 4 — Connect your phone to this computer');
+  console.log(`Your computer's address: ${bold(ip || '(couldn\'t detect it — check your Wi-Fi settings for "IP address")')}`);
+  console.log(`Port: ${bold(String(PROXY_PORT))}`);
+  console.log(`
+On your phone:
+  Settings → Wi-Fi → tap your network → Modify network → Advanced
+  Set "Proxy" to Manual
+  Proxy hostname: ${ip || '<this computer\'s IP address>'}
+  Proxy port: ${PROXY_PORT}`);
+  await pause('Go do that now.');
+
+  heading('STEP 2 of 4 — Install the security certificate');
+  console.log(`
+On your phone, open a web browser and go to:
+  http://mitm.it
+
+Tap the Android icon, download the certificate, and install it
+(any name is fine when it asks).`);
+  await pause('Go do that now.');
+
+  heading('STEP 3 of 4 — Trigger the unlock');
+  console.log(`
+📱  Open your phone's dialer app
+📞  Type your carrier's SIM-unlock code (ask your carrier if you don't have it)
+☎️   Press call
+
+Watch below — you'll see "[OEM Unlock]" lines appear when it works. ✅
+Press Ctrl+C here when you're done.`);
+
+  heading('STEP 4 of 4 — Listening for the unlock request...');
   const proc = spawn('mitmproxy', ['-s', path.join(ROOT, 'oem_unlock.js')], {
     cwd: ROOT,
     stdio: 'inherit',
   });
   proc.on('exit', (code) => process.exit(code || 0));
-} else {
+}
+
+async function runProxyPinPath() {
+  heading("STEP 1 of 4 — Install \"Proxy Pin\" on your phone");
   console.log(`
-mitmproxy isn't installed, so there's no desktop process for this command
-to launch — that's expected if you're using the Proxy Pin Android app,
-which runs entirely on the phone with no CLI to start from here.
+Open the Play Store on your phone and install the free app
+called "Proxy Pin".`);
+  await pause('Go do that now.');
 
-To run with Proxy Pin (see proxypinondevice.md / Nuke-unlock-doc.md):
-  1. Open the Proxy Pin app, load the script you need, and enable it there
-  2. Confirm the device proxy + CA cert are set up (npm run setup)
-  3. Go to your phone's dialer and enter your carrier's SIM-unlock USSD
-     trigger code — watch Proxy Pin's in-app log for [OEM Unlock] lines
+  heading('STEP 2 of 4 — Load the unlock script');
+  console.log(`
+1. Open Proxy Pin and grant it VPN permission when it asks
+2. Go to Scripts → New Script
+3. On this computer, open the file: ${bold('proxypin-oem-unlock.js')}
+4. Copy ALL of its text and paste it into Proxy Pin
+5. Turn the script ON`);
+  await pause('Go do that now.');
 
-To run with mitmproxy instead: pip install mitmproxy, then re-run npm start.
-`);
+  heading('STEP 3 of 4 — Turn on the certificate');
+  console.log(`
+1. In Proxy Pin, go to the Certificate section
+2. Tap Install / Download Certificate
+3. Follow the on-screen steps to trust it`);
+  await pause('Go do that now.');
+
+  heading('STEP 4 of 4 — Trigger the unlock');
+  console.log(`
+📱  Open your phone's dialer app
+📞  Type your carrier's SIM-unlock code (ask your carrier if you don't have it)
+☎️   Press call
+
+Watch Proxy Pin's log inside the app — you'll see "[OEM Unlock]"
+lines appear when it works. ✅
+
+(This window is running a local test server in the background, in
+case you want to try the offline walkthrough first — see
+HOW-TO-WITH-PROXYPIN-OFFLINE.md. Press Ctrl+C to stop it.)`);
   startOfflineMockServer();
 }
+
+async function main() {
+  console.log(bold('\n🔓  OEM UNLOCK — EASY MODE\n'));
+  console.log("This walks you through unlocking your phone's OEM unlock");
+  console.log('toggle, one step at a time. Nothing technical required —');
+  console.log("just follow along and tap what it says.\n");
+
+  if (offlineOnly) {
+    console.log("Offline mode: no phone needed, just testing the scripts locally.");
+    startOfflineMockServer();
+    return;
+  }
+
+  console.log('Getting things ready...');
+  if (!buildScripts()) {
+    console.error('\nSomething went wrong building the scripts — see the error above.');
+    process.exit(1);
+  }
+  console.log('  ✓ Unlock scripts ready');
+
+  const certResult = ensureCert();
+  if (certResult === 'generated' || certResult === 'exists') {
+    console.log('  ✓ Certificate ready');
+  }
+
+  if (hasBinary('mitmproxy')) {
+    await runDesktopProxyPath();
+  } else {
+    console.log('  (Using the phone-only method — no extra software needed on this computer.)');
+    await runProxyPinPath();
+  }
+}
+
+main();

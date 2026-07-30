@@ -64,49 +64,49 @@ file does and why it's structured this way.
 
 🚀 Installation & Setup
 
-Two commands, run once each per machine:
+One command. No prior experience with proxies, certificates, or Android
+settings needed — it asks for exactly one thing at a time and waits for
+you before moving on:
 
 ```bash
 git clone <your-repo>
 cd OEM_Unlock
-npm run setup   # builds the scripts, generates a local cert, prints device-prep steps
-npm start        # launches the interceptor (mitmproxy if installed) and tells you what's next
+npm start
 ```
 
-`npm run setup` builds all six interceptor scripts from `src/`, generates a
-local HTTPS certificate if `openssl` is available, and prints the one-time
-device-side steps (proxy settings + CA cert install) that genuinely can't
-be automated from a repo script — they happen on your phone, not here.
+That's it — this single command builds everything, then walks you through
+the rest step by step: connecting your phone, installing a certificate,
+and telling you exactly when to dial the unlock code. Just follow along
+and press Enter when it tells you to.
 
-`npm start` launches `mitmproxy -s oem_unlock.js` directly if `mitmproxy`
-is installed (`pip install mitmproxy` first). If you're using the Proxy
-Pin Android app instead, there's no desktop process for this command to
-start — Proxy Pin runs entirely on the phone — so it prints the exact
-manual steps for that path instead and starts the offline mock server as
-a fallback. See `HOW-TO-WITH-PROXYPIN-OFFLINE.md`, `proxypinondevice.md`,
-or `Nuke-unlock-doc.md` for which script fits your setup.
-
-Everything from here on is manual by nature: installing a cert on a phone
-and dialing a USSD code aren't things a setup script can do for you.
+If you'd rather do the prep without the guided walkthrough (e.g. for
+scripting or re-running after you already know the steps), `npm run
+setup` does the same build-and-cert step non-interactively and exits.
+`npm start -- --offline` skips straight to a local test server, no phone
+required — useful for trying things out first.
 
 🛠️ Usage Instructions
 
-Basic Flow
+`npm start` is the whole flow. It figures out which method fits your setup
+(desktop proxy tool vs. the Proxy Pin Android app) and only shows you the
+steps that apply. Under the hood, here's what's actually happening at
+each stage — useful if something doesn't match what you see on screen:
 
-1. `npm run setup && npm start` (see above)
-2. Confirm your device's proxy points at this machine, and the proxy
-   tool's CA cert is installed on the device (both covered by `npm run setup`'s printed checklist)
-3. **Go to your phone's dialer and enter your carrier's SIM-unlock USSD
-   trigger code.** That's what makes Android fire its provisioning check
-   against Google's AFW APIs — this proxy is what intercepts that request
-   and rewrites the response to say the unlock is allowed. The USSD dial
-   itself never goes over the network the proxy can see; it's purely the
-   trigger that causes the *next* step, the actual HTTPS provisioning
-   call, to fire.
-4. Watch the proxy console (or Proxy Pin's in-app log) for `[OEM Unlock]`
-   lines confirming a response was modified
-5. Verify Unlock: check Settings > Developer Options — the OEM unlocking
-   toggle should now be enabled
+1. The scripts get built and a certificate gets prepared
+2. You connect your phone to the interceptor (either by pointing its
+   Wi-Fi proxy at this computer, or by installing the Proxy Pin app —
+   `npm start` tells you which)
+3. **You dial your carrier's SIM-unlock USSD trigger code from your
+   phone's regular dialer.** That's what makes Android fire its
+   provisioning check against Google's AFW APIs — the interceptor is what
+   catches that request and rewrites the response to say the unlock is
+   allowed. The USSD dial itself never goes over the network the
+   interceptor can see; it's purely the trigger that causes the *next*
+   step, the actual HTTPS provisioning call, to fire.
+4. Watch the terminal (or Proxy Pin's in-app log) for `[OEM Unlock]` lines
+   confirming a response was modified
+5. Check Settings > Developer Options — the OEM unlocking toggle should
+   now be enabled
 
 Advanced Usage
 

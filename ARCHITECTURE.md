@@ -70,19 +70,22 @@ same copy-paste-into-your-proxy-tool workflow as before, now produced by
 — run via `npm test` (Node's built-in `node:test`, no dependency to add).
 Possible now because `src/core` doesn't touch any proxy-runtime globals.
 
-### `scripts/` — the two entry points
+### `scripts/` — one guided entry point
 
 | File | Role |
 |---|---|
-| `setup.js` (`npm run setup`) | Runs the build, generates a local self-signed cert via `openssl` if one doesn't already exist, and prints the one-time device-prep checklist (proxy settings, CA install) that can't be automated from here because it happens on the phone. |
-| `start.js` (`npm start` / `npm run start-offline`) | Launches `mitmproxy -s oem_unlock.js` directly if `mitmproxy` is installed — that's the actual "run" step for the desktop-proxy workflow. If it isn't installed (e.g. you're on the Proxy Pin Android app, which has no desktop CLI to launch), it prints the Proxy Pin manual-load steps instead of pretending to automate something it can't reach, and falls back to starting the offline mock server. `--offline` skips straight to the mock server. |
+| `lib.js` | Shared helpers used by both scripts below: `buildScripts()`, `ensureCert()`, `getLocalIp()` (for telling the phone what address to proxy through), `hasBinary()`. One implementation, not duplicated between the two commands. |
+| `start.js` (`npm start`) | The one command most people need. Builds everything, then walks through the rest as a numbered, plain-language wizard — pausing after each step (via `readline`) until you press Enter, so you can go do it on your phone first. Branches between two paths depending on whether `mitmproxy` is installed: a desktop-proxy path (shows your LAN IP + port, waits for the cert to be installed, then launches `mitmproxy -s oem_unlock.js` in the foreground) or a Proxy Pin path (phone-only, no desktop process to launch, so it prints the in-app steps instead). Ends both paths at the same instruction: dial the carrier's SIM-unlock USSD code. Falls back to a non-interactive mode automatically (no hanging on `Press ENTER`) when there's no TTY attached — e.g. run from CI or a script. `--offline` skips straight to the mock server, no phone required. |
+| `setup.js` (`npm run setup`) | The non-interactive version of `start.js`'s first step only: build + cert, then exit. For scripting, CI, or anyone who wants the prep without the wizard. |
 
-Both exist so the whole desktop-side prep collapses to two commands
-(`npm run setup && npm start`) before you go to the device and trigger the
-actual unlock flow (dial the carrier's SIM-unlock USSD code, which is what
-causes Android to fire the AFW provisioning request this proxy is watching
-for — the USSD dial itself is never visible to the proxy, only the HTTPS
-request it triggers is).
+The wizard framing exists because the previous two-command version
+(`npm run setup && npm start`) still assumed you knew what a LAN IP,
+a certificate, or a USSD trigger code were. `npm start` now explains each
+one inline, one at a time, and never dumps the whole checklist at once.
+
+The USSD dial itself is never visible to the interceptor — only the actual
+HTTPS provisioning request it triggers is, which is what every path above
+converges on watching for.
 
 ### Offline/local tooling
 
