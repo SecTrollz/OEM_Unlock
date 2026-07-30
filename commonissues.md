@@ -46,6 +46,44 @@ adb push mitmproxy-ca-cert.pem /sdcard/
 adb shell am start -n com.android.certinstaller/.CertInstallerMain
 ```
 
+**Exact error: Proxy Pin's Capture Detail shows `Status Code: -2 SSL
+handshake failed, please check the certificate` with a response body of**
+
+```
+HandshakeException: Handshake error in server (OS Error:
+SSLV3_ALERT_CERTIFICATE_UNKNOWN(tls_record.cc:486))
+```
+
+**on a `CONNECT` to a target host (e.g. `afwprovisioning-pa.googleapis.com`)
+with `Remote Address` blank.**
+
+This means Proxy Pin is intercepting the right host — the failure happens
+before it ever reaches Google's servers. It's failing its own local
+handshake with whatever made the request (here, GmsCore/Google Play
+services), because that caller doesn't trust the cert Proxy Pin forged for
+this connection. Work through these in order:
+
+1. **Reboot the device.** A freshly-installed CA cert sometimes doesn't
+   take effect until the trust store reloads on restart. Cheap to rule out
+   first.
+2. **Still failing after reboot? Check root.** Since Android 7, no app
+   trusts a plain *user*-installed certificate (Settings > Security >
+   Install from storage) by default — and system-level Google processes
+   like GmsCore are exactly the kind that won't make an exception. If your
+   device isn't rooted, a user cert alone is very unlikely to ever satisfy
+   this specific request, regardless of reboots or reinstalls.
+3. **If rooted:** use Proxy Pin's Certificate section to set the cert to
+   **System Trusted** (also referenced in `proxypinondevice.md`'s setup
+   steps) instead of relying on the plain Settings install path — or use a
+   Magisk module (e.g. MagiskTrustUserCerts) to push it into the system
+   trust store directly.
+4. **If this specific host still fails after a confirmed system-trusted
+   cert, but other HTTPS traffic through the proxy now works fine** —
+   that's the point where it's worth suspecting certificate pinning on
+   that particular Google endpoint rather than a trust-store issue. That's
+   a different, harder problem this proxy-based approach can't route
+   around.
+
 4. SCRIPT NOT LOADING PROPERLY
 
 Test with this minimal script first to confirm interception is working at
